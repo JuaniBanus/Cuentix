@@ -26,7 +26,7 @@ from app.models import Consulta, Intencion, Moneda, Movimiento, TipoMovimiento
 
 logger = logging.getLogger(__name__)
 
-MODELO = "gemini-2.5-flash"
+MODELO = "gemini-3.5-flash-lite"
 
 # Cliente único a nivel módulo: reutiliza la conexión HTTP entre mensajes.
 _cliente = genai.Client(api_key=GEMINI_API_KEY)
@@ -253,9 +253,11 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
                 response_mime_type="application/json",
                 response_schema=_InterpretacionExtraida,
                 temperature=0,  # extracción determinista, no queremos creatividad
-                # gemini-2.5-flash razona por defecto; para esta tarea no aporta
-                # y agrega latencia y costo en cada mensaje del bot.
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                # El modelo razona por defecto; para esta tarea no aporta y
+                # agrega latencia y costo en cada mensaje del bot.
+                # Los Gemini 3.x usan thinking_level: pasarles el thinking_budget
+                # de la generación 2.5 devuelve 400 INVALID_ARGUMENT.
+                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
         )
     except genai_errors.APIError as exc:
