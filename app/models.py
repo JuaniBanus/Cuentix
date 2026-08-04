@@ -19,6 +19,7 @@ class TipoMovimiento(str, Enum):
 class Moneda(str, Enum):
     ARS = "ARS"
     USD = "USD"
+    EUR = "EUR"
 
 
 class Intencion(str, Enum):
