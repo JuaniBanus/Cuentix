@@ -26,6 +26,12 @@
 
 * { box-sizing: border-box; }
 
+/* El atributo hidden lo aplica el navegador con `display: none`, y CUALQUIER
+   regla de autor que fije display se lo come: `.login { display: grid }` hacía
+   que la pantalla de login se dibujara siempre, colgando debajo de la app.
+   Esta regla lo blinda para todo el documento. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   background: var(--fondo);
@@ -234,6 +240,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tab.es-activo { color: var(--acento-claro); }
 
 /* ------------------------------------------------------------------ Login */
+
+.carga-inicial { display: grid; place-items: center; min-height: 100svh; }
+.carga-inicial .login-marca { margin: 0; opacity: .55; }
 
 .login { display: grid; place-items: center; min-height: 100svh; padding: 24px 20px; }
 .login-caja { width: 100%; max-width: 340px; }
