@@ -5,9 +5,15 @@ import { alternarOcultos, montosOcultos } from "./format.js";
 import { renderInicio } from "./screens/inicio.js";
 
 const vistas = {
+  carga: document.querySelector("#vista-carga"),
   login: document.querySelector("#vista-login"),
   app: document.querySelector("#vista-app"),
 };
+
+/** Una sola vista visible a la vez: login y app nunca conviven en pantalla. */
+function mostrar(cual) {
+  for (const [nombre, nodo] of Object.entries(vistas)) nodo.hidden = nombre !== cual;
+}
 const contenido = document.querySelector("#contenido");
 
 const estado = {
@@ -22,19 +28,24 @@ const estado = {
 // --------------------------------------------------------------------------
 
 async function arrancar() {
-  const sesion = await sesionActual();
+  let sesion = null;
+  try {
+    sesion = await sesionActual();
+  } catch {
+    // Si la sesión guardada no se puede validar (token vencido, sin red),
+    // se pide login de nuevo: es preferible a quedarse en la carga para siempre.
+  }
   if (sesion) await mostrarApp();
   else mostrarLogin();
 }
 
 function mostrarLogin() {
-  vistas.login.hidden = false;
-  vistas.app.hidden = true;
+  mostrar("login");
+  document.querySelector("#form-login").email.focus();
 }
 
 async function mostrarApp() {
-  vistas.login.hidden = true;
-  vistas.app.hidden = false;
+  mostrar("app");
   await cargarDatos();
 }
 
