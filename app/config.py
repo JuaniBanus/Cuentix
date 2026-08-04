@@ -34,6 +34,30 @@ def _requerida(nombre: str) -> str:
     return valor
 
 
+def _requerida_chat_ids(nombre: str) -> frozenset[int]:
+    """Lee una lista de chat_id separados por coma y la devuelve como enteros.
+
+    Falla si está vacía o si algún valor no es un número: dejar la lista vacía
+    equivaldría a abrir el bot a cualquiera, y eso tiene que ser una decisión
+    explícita y no el resultado de un typo.
+    """
+    ids = set()
+    for parte in _requerida(nombre).split(","):
+        parte = parte.strip()
+        if not parte:
+            continue
+        try:
+            ids.add(int(parte))
+        except ValueError:
+            raise ConfigError(
+                f"{nombre} tiene un valor que no es un número: {parte!r}.\n"
+                f"Es una lista de chat_id separados por coma, por ejemplo: 123456789"
+            ) from None
+    if not ids:
+        raise ConfigError(f"{nombre} no tiene ningún chat_id.")
+    return frozenset(ids)
+
+
 TELEGRAM_TOKEN: str = _requerida("TELEGRAM_TOKEN")
 GEMINI_API_KEY: str = _requerida("GEMINI_API_KEY")
 
@@ -47,3 +71,9 @@ WEBHOOK_SECRET: str = _requerida("WEBHOOK_SECRET")
 # tiene RLS activo sin policies, así que la clave pública no puede tocarla.
 SUPABASE_URL: str = _requerida("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY: str = _requerida("SUPABASE_KEY")
+
+# Quiénes pueden usar el bot. El username de un bot es público, así que
+# cualquiera que lo encuentre puede escribirle; sin esta lista sus movimientos
+# se mezclarían con los propios en la misma tabla. Para sumar a alguien, se
+# agrega su chat_id separado por coma.
+CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
