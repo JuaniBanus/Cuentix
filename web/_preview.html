@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="cabecera"><p class="marca">Cuentix</p></header>
+<main id="contenido" class="contenido"></main>
+<nav class="tabs">
+  <button class="tab es-activo" data-tab="inicio"><span>Inicio</span></button>
+  <button class="tab" data-tab="gastos"><span>Gastos</span></button>
+  <button class="tab" data-tab="ahorros"><span>Ahorros</span></button>
+  <button class="tab" data-tab="inversiones"><span>Inversiones</span></button>
+</nav>
+<script type="module">
+import { renderInicio } from "./js/screens/inicio.js";
+const movs = [
+  {id:9, fecha:"2026-08-04", tipo:"gasto",   monto:8500,   moneda:"ARS", categoria:"comida",        descripcion:"pancho y coca"},
+  {id:8, fecha:"2026-08-04", tipo:"gasto",   monto:45000,  moneda:"ARS", categoria:"servicios",     descripcion:"luz"},
+  {id:7, fecha:"2026-08-03", tipo:"gasto",   monto:32000,  moneda:"ARS", categoria:"supermercado",  descripcion:"compra semanal"},
+  {id:6, fecha:"2026-08-03", tipo:"ingreso", monto:300000, moneda:"ARS", categoria:"sueldo",        descripcion:"sueldo agosto"},
+  {id:5, fecha:"2026-08-02", tipo:"gasto",   monto:12000,  moneda:"ARS", categoria:"transporte",    descripcion:"nafta"},
+  {id:4, fecha:"2026-08-02", tipo:"ahorro",  monto:50000,  moneda:"ARS", categoria:"plazo fijo",    descripcion:"plazo fijo"},
+  {id:3, fecha:"2026-08-01", tipo:"gasto",   monto:18000,  moneda:"ARS", categoria:"ocio",          descripcion:"cine y cena"},
+  {id:2, fecha:"2026-08-01", tipo:"gasto",   monto:9000,   moneda:"ARS", categoria:"salud",         descripcion:"farmacia"},
+  {id:1, fecha:"2026-08-01", tipo:"gasto",   monto:4000,   moneda:"ARS", categoria:"ropa",          descripcion:"medias"},
+];
+renderInicio(document.querySelector("#contenido"), movs, {
+  moneda:"ARS", monedas:["ARS","USD"], setMoneda:()=>{},
+});
+</script>
+</body>
+</html>
