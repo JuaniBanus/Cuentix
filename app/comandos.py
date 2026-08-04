@@ -1,0 +1,147 @@
+"""Respuestas fijas a saludos y comandos, resueltas sin pasar por Gemini.
+
+Un "hola" no tiene nada que interpretar: mandarlo al modelo sería pagar una
+llamada, y esperar un segundo, para que conteste que no entendió. Acá se
+resuelve con texto fijo antes de que el mensaje llegue al parser.
+"""
+
+from __future__ import annotations
+
+import unicodedata
+
+MSG_BIENVENIDA = """\
+¡Hola! Soy Cuentix 🧮, tu asistente para llevar las cuentas.
+
+Escribime como le hablarías a un amigo y yo anoto:
+• «gasté 8 lucas en el súper»
+• «me entraron 300 mil de sueldo»
+• «puse 500 dólares en cripto»
+• «aparté 50 mil para el viaje»
+
+Y cuando quieras saber cómo venís, preguntame:
+• «¿cuánto gasté este mes?»
+• «¿en qué se me va la plata?»
+• «¿cómo vengo este mes?»
+
+Entiendo fechas («ayer», «el lunes», «el 3») y la jerga de siempre:
+lucas, palos y gambas.
+
+Escribí /ayuda para ver todo lo que puedo hacer."""
+
+MSG_AYUDA = """\
+🧮 Cuentix — todo lo que puedo hacer
+
+📝 ANOTAR MOVIMIENTOS
+Escribime en lenguaje natural y yo me doy cuenta de qué se trata.
+
+• Gastos — plata que sale y no vuelve
+  «gasté 8 lucas en el súper» · «pagué 45 mil de luz»
+• Ingresos — plata que entra
+  «cobré el sueldo, 900 mil» · «me entraron 200 mil de un freelance»
+• Ahorros — plata que guardás y sigue siendo tuya
+  «aparté 50 mil para el viaje» · «puse 100 mil en el plazo fijo»
+• Inversiones — plata que ponés a rendir, asumiendo riesgo
+  «compré 500 dólares» · «metí 80 mil en cripto»
+
+Si dudás entre ahorro e inversión: si puede perder valor, es inversión.
+
+📊 PREGUNTARME
+• Totales — «¿cuánto gasté este mes?» · «¿cuánto llevo ahorrado en dólares?»
+• Por rubro — «¿en qué se me va la plata?» · «¿cuánto gasté en supermercado?»
+• Balance — «¿cómo vengo este mes?» · «balance de julio»
+
+🗓 FECHAS
+Entiendo «ayer», «anteayer», «el lunes», «el 3», «la semana pasada».
+Si no aclarás nada, uso el día de hoy.
+
+💵 MONTOS
+Jerga: luca = 1.000 · palo = 1.000.000 · gamba = 100.
+Formato argentino: «15.340,50».
+Si no aclarás moneda, asumo pesos. Para dólares: «dólares», «usd», «verdes».
+
+⚙️ COMANDOS
+/start — presentación
+/ayuda — esta ayuda
+
+Todavía no puedo editar ni borrar movimientos ya cargados."""
+
+# Las claves van normalizadas: minúsculas, sin tildes y sin signos.
+_SALUDOS = frozenset(
+    {
+        "/start",
+        "hola",
+        "holaa",
+        "holaaa",
+        "holis",
+        "ola",
+        "buenas",
+        "buen dia",
+        "buenos dias",
+        "buenas tardes",
+        "buenas noches",
+        "hey",
+        "que tal",
+        "que onda",
+        "como andas",
+        "como va",
+        "hola cuentix",
+        "buenas cuentix",
+    }
+)
+
+_AYUDA = frozenset(
+    {
+        "/ayuda",
+        "/help",
+        "ayuda",
+        "help",
+        "que podes hacer",
+        "que sabes hacer",
+        "que puedo hacer",
+        "que haces",
+        "como funciona",
+        "como te uso",
+        "para que servis",
+        "comandos",
+    }
+)
+
+# Los signos no aportan nada para comparar: "¿qué podés hacer?" tiene que
+# entrar por la misma puerta que "que podes hacer".
+_SIGNOS = " ¡!¿?.,;:…\"'"
+
+
+def _normalizar(texto: str) -> str:
+    """Baja a minúsculas, saca tildes y signos, y colapsa los espacios."""
+    # NFD separa cada letra de su tilde, y "Mn" (marca no espaciada) es
+    # justamente esa tilde suelta: descartándola queda la letra pelada.
+    sin_tildes = "".join(
+        caracter
+        for caracter in unicodedata.normalize("NFD", texto.lower())
+        if unicodedata.category(caracter) != "Mn"
+    )
+    return " ".join(sin_tildes.strip(_SIGNOS).split())
+
+
+def respuesta_directa(texto: str) -> str | None:
+    """La respuesta fija que corresponde al mensaje, o None si no hay ninguna.
+
+    None significa "esto hay que interpretarlo": el mensaje sigue camino al
+    parser como siempre.
+
+    Compara el mensaje ENTERO y no su comienzo, a propósito. Con un `startswith`
+    un "hola, gasté 8 lucas en el súper" se comería el gasto y contestaría el
+    saludo. Así, un saludo con algo más atrás es un mensaje común y se
+    interpreta normal.
+    """
+    clave = _normalizar(texto)
+
+    # En un grupo, Telegram manda "/start@Cuentia_Bot" en lugar de "/start".
+    if clave.startswith("/"):
+        clave = clave.split("@", 1)[0]
+
+    if clave in _SALUDOS:
+        return MSG_BIENVENIDA
+    if clave in _AYUDA:
+        return MSG_AYUDA
+    return None

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from starlette.concurrency import run_in_threadpool
 
+from app.comandos import respuesta_directa
 from app.config import CHATS_PERMITIDOS, WEBHOOK_SECRET
 from app.db import Total, balance, guardar_movimiento, init_db, totales_por_categoria, totales_por_moneda
 from app.models import Consulta, Intencion, Moneda, Movimiento
@@ -36,7 +37,8 @@ MSG_SOLO_TEXTO = (
 MSG_NO_ENTENDI = (
     "No entendí 🤔\n"
     "Podés anotar algo: «pagué 45 mil de luz»\n"
-    "o preguntarme: «¿cuánto gasté este mes?»"
+    "o preguntarme: «¿cuánto gasté este mes?»\n\n"
+    "Escribí /ayuda para ver todo lo que puedo hacer."
 )
 MSG_ERROR_INTERNO = "Se me rompió algo 😬 Probá de nuevo en un ratito."
 
@@ -124,6 +126,15 @@ async def procesar_update(update: Any) -> None:
 
     chat_id, texto, _ = entrante
     logger.info("Mensaje de %s: %r", chat_id, texto)
+
+    # Saludos y comandos salen por texto fijo, antes del parser: un "hola" no
+    # tiene nada que interpretar, y mandarlo a Gemini sería pagar una llamada
+    # y esperarla para que conteste que no entendió.
+    directa = respuesta_directa(texto)
+    if directa is not None:
+        logger.info("Respuesta fija para %r", texto)
+        await _responder(chat_id, directa)
+        return
 
     try:
         # interpretar_mensaje y las funciones de db son síncronas y bloqueantes
