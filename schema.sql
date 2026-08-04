@@ -24,7 +24,10 @@ create table if not exists public.movimientos (
     -- el filtro compara con eq, así que un 'Super' guardado nunca matchearía).
     categoria   text          not null check (char_length(categoria) between 1 and 60),
 
-    -- El texto original del mensaje del usuario.
+    -- Etiqueta corta generada por el parser ("pancho y coca"), no el mensaje
+    -- del usuario: el texto original se usa en memoria y no se persiste.
+    -- El check sigue admitiendo hasta 500 por las filas viejas, anteriores al
+    -- cambio; las nuevas vienen recortadas a 60 desde app/parser.py.
     descripcion text          not null check (char_length(descripcion) between 1 and 500),
 
     created_at  timestamptz   not null default now()
