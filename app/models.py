@@ -45,7 +45,11 @@ class Movimiento(BaseModel):
     monto: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     moneda: Moneda = Moneda.ARS
     categoria: str = Field(min_length=1, max_length=60)
-    descripcion: str = Field(min_length=1, max_length=500)
+    # Etiqueta corta generada por el parser ("pancho y coca"), NO el mensaje
+    # del usuario: esa frase se usa en memoria para extraer el movimiento y se
+    # descarta. El tope de 60 es el mismo que el de categoria, porque ahora
+    # son dos etiquetas del mismo orden y no un texto libre.
+    descripcion: str = Field(min_length=1, max_length=60)
 
 
 class Consulta(BaseModel):

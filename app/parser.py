@@ -44,9 +44,10 @@ class ParserError(RuntimeError):
 #    `Decimal`. Acá usamos `float` sin restricciones, y la validación fuerte
 #    (monto > 0, decimales, longitudes) la aplica `Movimiento` al construir
 #    el objeto final.
-# 2. `descripcion` no está: es el texto original del usuario, así que lo
-#    ponemos nosotros en Python en vez de gastar tokens pidiéndoselo al modelo
-#    y arriesgar que lo reescriba.
+# 2. `descripcion` sí está, y es a propósito: antes guardábamos el mensaje
+#    literal del usuario, y esa frase quedaba en la base para siempre sin que
+#    nada la leyera. Ahora el modelo devuelve una etiqueta corta, que es la
+#    parte útil sin arrastrar cómo lo escribió.
 #
 # Ojo: el docstring de una clase viajaría a la API como `description` del
 # schema, por eso las notas van como comentario.
@@ -56,6 +57,7 @@ class _MovimientoExtraido(BaseModel):
     monto: float
     moneda: Moneda = Moneda.ARS
     categoria: str
+    descripcion: str
 
 
 class _ConsultaExtraida(BaseModel):
@@ -150,6 +152,18 @@ CATEGORIA
   cripto, plazo fijo, otros.
 - Si nada encaja, usá "otros".
 
+DESCRIPCION
+- Una etiqueta de 2 a 5 palabras que diga QUE se compró o de dónde salió la
+  plata, para distinguir dos movimientos de la misma categoría el mismo día.
+  "pancho y coca", "sueldo agosto", "nafta", "cena con amigos", "plazo fijo".
+- En minúsculas, sin tildes ni signos. Máximo 60 caracteres.
+- NO copies la frase del usuario ni la parafrasees entera: es una etiqueta,
+  no un resumen. Nada de montos, fechas ni verbos conjugados.
+- NO incluyas datos personales: ni nombres propios, ni apodos, ni direcciones,
+  ni comentarios sobre personas. "el regalo para Sofía" -> "regalo".
+  "le pagué a mi psicóloga" -> "sesion".
+- Si el mensaje no dice qué fue, repetí la categoría.
+
 =========================== SI ES UNA CONSULTA ==========================
 Elegí la intención que corresponda, completá "consulta" y dejá
 "movimiento" en null.
@@ -179,8 +193,11 @@ Poné intencion="desconocida" con los dos objetos en null. Usalo para saludos,
 charla suelta o mensajes que no se entienden. No fuerces un registro."""
 
 
-def _a_movimiento(extraido: _MovimientoExtraido, texto: str) -> Movimiento:
+def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
     """Convierte la salida de Gemini en el Movimiento definitivo.
+
+    No recibe el mensaje del usuario a propósito: la etiqueta la genera el
+    modelo y el texto original no sale nunca de `interpretar_mensaje`.
 
     `Decimal(str(...))` y no `Decimal(float)`: convertir el float directo
     arrastraría la basura binaria (0.1 -> 0.1000000000000000055...).
@@ -190,14 +207,25 @@ def _a_movimiento(extraido: _MovimientoExtraido, texto: str) -> Movimiento:
     except (InvalidOperation, ValueError) as exc:
         raise ParserError(f"Gemini devolvió un monto inusable: {extraido.monto!r}") from exc
 
+    categoria = extraido.categoria.strip().lower()
+
+    # El prompt pide 2 a 5 palabras, pero es un pedido y no una garantía: si el
+    # modelo se pasa de largo, recortamos en vez de dejar que Movimiento lance
+    # ValidationError, porque eso costaría el movimiento entero. El split/join
+    # colapsa saltos de línea y espacios repetidos.
+    descripcion = " ".join(extraido.descripcion.split()).lower()[:60].strip()
+
     try:
         return Movimiento(
             fecha=extraido.fecha,
             tipo=extraido.tipo,
             monto=monto,
             moneda=extraido.moneda,
-            categoria=extraido.categoria.strip().lower(),
-            descripcion=texto.strip(),
+            categoria=categoria,
+            # Si el modelo la devuelve vacía, la categoría es un detalle pobre
+            # pero válido: mejor eso que perder el movimiento por un campo
+            # que no se muestra en ninguna respuesta.
+            descripcion=descripcion or categoria,
         )
     except ValidationError as exc:
         # Típicamente: monto <= 0 o categoria vacía.
@@ -284,7 +312,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             raise ParserError("Dijo registrar pero no extrajo el movimiento.")
         return Interpretacion(
             intencion=Intencion.REGISTRAR,
-            movimiento=_a_movimiento(extraida.movimiento, texto),
+            movimiento=_a_movimiento(extraida.movimiento),
         )
 
     if extraida.intencion is Intencion.DESCONOCIDA:
