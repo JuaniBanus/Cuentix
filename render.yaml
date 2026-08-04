@@ -1,0 +1,39 @@
+# Configuración del servicio en Render.
+#
+# Render no usa Procfile (eso es de Heroku): el equivalente es este archivo.
+# Se puede crear el servicio a mano desde el panel y pegar el startCommand,
+# pero teniéndolo acá queda versionado y no depende de que nadie lo tipee bien.
+
+services:
+  - type: web
+    name: cuentix-bot
+    runtime: python
+    plan: free
+
+    buildCommand: pip install -r requirements.txt
+
+    # $PORT lo asigna Render en cada arranque y cambia entre deploys: hay que
+    # leerlo de la variable, no fijar un número. Y host 0.0.0.0 —no 127.0.0.1—
+    # o el proceso solo escucharía adentro del contenedor y Render lo daría
+    # por caído.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    # Render pega acá para confirmar que el deploy quedó sano. Es el endpoint
+    # de app/main.py que devuelve {"status": "ok"}.
+    healthCheckPath: /
+
+    # sync: false = Render las pide por el panel y no las guarda en el repo.
+    # Son todas secretas; ninguna puede tener su valor escrito acá.
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: CHATS_PERMITIDOS
+        sync: false

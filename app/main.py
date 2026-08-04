@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from starlette.concurrency import run_in_threadpool
 
-from app.config import WEBHOOK_SECRET
+from app.config import CHATS_PERMITIDOS, WEBHOOK_SECRET
 from app.db import Total, balance, guardar_movimiento, init_db, totales_por_categoria, totales_por_moneda
 from app.models import Consulta, Intencion, Moneda, Movimiento
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
@@ -102,12 +102,19 @@ async def procesar_update(update: Any) -> None:
     Telegram ya se mandó, así que un error solo serviría para ensuciar el log
     y dejar al usuario sin respuesta.
     """
+    # El filtro va antes que todo lo demás: a un chat ajeno no le contestamos
+    # nada, ni siquiera "solo entiendo texto". Un bot que responde confirma que
+    # existe e invita a seguir probando; uno mudo se abandona enseguida.
+    chat_id = extraer_chat_id(update)
+    if chat_id is not None and chat_id not in CHATS_PERMITIDOS:
+        logger.warning("Mensaje ignorado: el chat %s no está autorizado", chat_id)
+        return
+
     entrante = extraer_mensaje(update)
 
     if entrante is None:
         # Puede ser una foto o un sticker (contestamos), o algo sin chat
         # como un callback de botón o un update de otro tipo (ignoramos).
-        chat_id = extraer_chat_id(update)
         if chat_id is not None:
             logger.info("Update sin texto en el chat %s", chat_id)
             await _responder(chat_id, MSG_SOLO_TEXTO)

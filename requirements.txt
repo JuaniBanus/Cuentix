@@ -1,7 +1,10 @@
-fastapi
-uvicorn[standard]
-httpx
-python-dotenv
-google-genai
-pydantic
-supabase
+# Versiones fijas: son exactamente las que se probaron funcionando. Sin fijar,
+# Render instala la última de cada una en cada deploy y un cambio incompatible
+# rompe el bot sin que nadie haya tocado el código.
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+httpx==0.28.1
+python-dotenv==1.2.2
+google-genai==2.16.0
+pydantic==2.13.4
+supabase==2.31.0

@@ -32,6 +32,9 @@ dist/
 .coverage
 htmlcov/
 
+# Binarios de terceros (cloudflared para el túnel de desarrollo)
+tools/
+
 # Editores / sistema operativo
 .vscode/
 .idea/
