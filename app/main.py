@@ -11,10 +11,24 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
 from starlette.concurrency import run_in_threadpool
 
+from app import pendientes
 from app.comandos import respuesta_directa
 from app.config import CHATS_PERMITIDOS, WEBHOOK_SECRET
-from app.db import Total, balance, guardar_movimiento, init_db, totales_por_categoria, totales_por_moneda
+from app.db import (
+    DBError,
+    Total,
+    balance,
+    crear_objetivo,
+    guardar_movimiento,
+    imputar_movimiento,
+    init_db,
+    obtener_objetivos,
+    total_imputado,
+    totales_por_categoria,
+    totales_por_moneda,
+)
 from app.models import Consulta, Intencion, Moneda, Movimiento
+from app.objetivos import buscar, parsear_monto, progreso
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
 from app.telegram import (
     TelegramError,
@@ -127,6 +141,29 @@ async def procesar_update(update: Any) -> None:
     chat_id, texto, _ = entrante
     logger.info("Mensaje de %s: %r", chat_id, texto)
 
+    # Si el bot dejó una pregunta abierta ("¿a cuál de los dos?"), el mensaje
+    # puede ser la respuesta. Va antes que todo lo demás porque un "1" o un
+    # "300 mil" sueltos no significan nada fuera de ese contexto.
+    #
+    # Si no parece una respuesta, devuelve None y el mensaje sigue su camino
+    # normal: nunca deja al usuario atrapado en la pregunta.
+    pendiente = pendientes.mirar(chat_id)
+    if pendiente is not None:
+        try:
+            respuesta = await _resolver_pendiente(chat_id, pendiente, texto)
+        except Exception:
+            logger.exception("Error resolviendo la pregunta pendiente de %s", chat_id)
+            pendientes.olvidar(chat_id)
+            await _responder(chat_id, MSG_ERROR_INTERNO)
+            return
+
+        if respuesta is not None:
+            await _responder(chat_id, respuesta)
+            return
+
+        logger.info("El mensaje no contestaba la pregunta abierta; se descarta")
+        pendientes.olvidar(chat_id)
+
     # Saludos y comandos salen por texto fijo, antes del parser: un "hola" no
     # tiene nada que interpretar, y mandarlo a Gemini sería pagar una llamada
     # y esperarla para que conteste que no entendió.
@@ -151,7 +188,7 @@ async def procesar_update(update: Any) -> None:
         return
 
     try:
-        respuesta = await _resolver(interpretacion)
+        respuesta = await _resolver(interpretacion, chat_id)
     except Exception:
         logger.exception("Error resolviendo la intención %s", interpretacion.intencion)
         await _responder(chat_id, MSG_ERROR_INTERNO)
@@ -160,12 +197,15 @@ async def procesar_update(update: Any) -> None:
     await _responder(chat_id, respuesta)
 
 
-async def _resolver(interpretacion: Interpretacion) -> str:
+async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
     """Ejecuta la intención y devuelve el texto a mandarle al usuario."""
     intencion = interpretacion.intencion
 
     if intencion is Intencion.REGISTRAR:
         movimiento = interpretacion.movimiento
+        if interpretacion.objetivo:
+            return await _registrar_hacia_objetivo(chat_id, movimiento, interpretacion.objetivo)
+
         movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
         return _confirmacion(movimiento)
@@ -184,6 +224,147 @@ async def _resolver(interpretacion: Interpretacion) -> str:
         return await run_in_threadpool(_texto_balance, consulta)
 
     return MSG_NO_ENTENDI
+
+
+# --------------------------------------------------------------------------
+# Ahorros imputados a un objetivo
+# --------------------------------------------------------------------------
+
+
+async def _registrar_hacia_objetivo(chat_id: int, movimiento: Movimiento, mencion: str) -> str:
+    """Guarda el ahorro y, si puede, lo imputa. Si no, pregunta.
+
+    El movimiento se guarda SIEMPRE, incluso cuando hay que preguntar: la plata
+    se apartó igual, y perder el registro por una duda sobre a qué objetivo va
+    sería el peor de los resultados.
+    """
+    objetivos = await run_in_threadpool(obtener_objetivos)
+    coincidencias = buscar(mencion, objetivos)
+
+    # Un solo objetivo coincide: es el único caso en que se puede imputar sin
+    # preguntar nada.
+    if coincidencias.unico is not None:
+        objetivo = coincidencias.unico
+        movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento, objetivo["id"])
+        logger.info("Movimiento %s imputado a %r", movimiento_id, objetivo["nombre"])
+        return await _texto_progreso(movimiento, objetivo)
+
+    movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
+    logger.info("Movimiento %s guardado sin imputar (mención %r)", movimiento_id, mencion)
+
+    if coincidencias.hay_varios:
+        pendientes.guardar(
+            chat_id,
+            pendientes.Pendiente(
+                tipo="elegir",
+                movimiento_id=movimiento_id,
+                mencion=mencion,
+                moneda=movimiento.moneda.value,
+                candidatos=coincidencias.objetivos,
+            ),
+        )
+        lista = "\n".join(
+            f"{i}. {o['nombre']}" for i, o in enumerate(coincidencias.objetivos, start=1)
+        )
+        return (
+            f"{_confirmacion(movimiento)}\n\n"
+            f"Tengo más de un objetivo que puede ser «{mencion}». ¿A cuál va?\n{lista}\n\n"
+            "Contestame con el número, o «ninguno»."
+        )
+
+    # No hay ninguno: se ofrece crearlo, pero no se inventa.
+    pendientes.guardar(
+        chat_id,
+        pendientes.Pendiente(
+            tipo="crear",
+            movimiento_id=movimiento_id,
+            mencion=mencion,
+            moneda=movimiento.moneda.value,
+        ),
+    )
+    return (
+        f"{_confirmacion(movimiento)}\n\n"
+        f"No tengo ningún objetivo que se llame «{mencion}». ¿Lo creo?\n"
+        "Decime cuánto querés juntar (por ejemplo «500 mil») o «no» para dejarlo así."
+    )
+
+
+async def _resolver_pendiente(chat_id: int, pendiente, texto: str) -> str | None:
+    """Contesta la pregunta abierta, o None si el mensaje no la contestaba.
+
+    None es importante: significa "esto era otra cosa", y el mensaje sigue al
+    parser como cualquier otro. Sin esa salida, un usuario que cambia de tema
+    quedaría atrapado contestando una pregunta que ya no le interesa.
+    """
+    respuesta = texto.strip().lower()
+
+    if respuesta in {"no", "ninguno", "ninguna", "nada", "cancelar", "dejalo", "no importa"}:
+        pendientes.olvidar(chat_id)
+        return "Listo, lo dejo sin objetivo 👍"
+
+    if pendiente.tipo == "elegir":
+        elegido = _elegir_candidato(pendiente, respuesta)
+        if elegido is None:
+            return None
+
+        pendientes.olvidar(chat_id)
+        await run_in_threadpool(imputar_movimiento, pendiente.movimiento_id, elegido["id"])
+        return await _texto_progreso(None, elegido)
+
+    # tipo == "crear"
+    monto = parsear_monto(texto)
+    if monto is None:
+        return None
+
+    try:
+        objetivo = await run_in_threadpool(
+            crear_objetivo,
+            nombre=pendiente.mencion,
+            monto_objetivo=monto,
+            moneda=Moneda(pendiente.moneda),
+        )
+    except DBError as exc:
+        pendientes.olvidar(chat_id)
+        logger.warning("No se pudo crear el objetivo %r: %s", pendiente.mencion, exc)
+        return f"No pude crear el objetivo 😕\n{exc}"
+
+    pendientes.olvidar(chat_id)
+    await run_in_threadpool(imputar_movimiento, pendiente.movimiento_id, objetivo["id"])
+    return f"Creé el objetivo «{objetivo['nombre']}» 🎯\n\n" + await _texto_progreso(None, objetivo)
+
+
+def _elegir_candidato(pendiente, respuesta: str) -> dict | None:
+    """El candidato que eligió el usuario: por número o por nombre."""
+    if respuesta.isdigit():
+        indice = int(respuesta)
+        if 1 <= indice <= len(pendiente.candidatos):
+            return pendiente.candidatos[indice - 1]
+        return None
+
+    # También vale escribir el nombre, si desempata solo.
+    return buscar(respuesta, pendiente.candidatos).unico
+
+
+async def _texto_progreso(movimiento: Movimiento | None, objetivo: dict) -> str:
+    """Ej: 'Sumé $150.000 al objetivo «Viaje a Europa». Vas 60%, te faltan $100.000.'"""
+    moneda = Moneda(objetivo["moneda"])
+    aportado = await run_in_threadpool(total_imputado, objetivo["id"], moneda)
+    meta = Decimal(str(objetivo["monto_objetivo"]))
+    porcentaje, falta, completo = progreso(aportado, meta)
+
+    if movimiento is not None:
+        cabeza = f"✅ Sumé {_formatear_monto(movimiento.monto, movimiento.moneda)}"
+    else:
+        cabeza = "✅ Imputado"
+
+    linea = f"{cabeza} al objetivo «{objetivo['nombre']}»."
+
+    if completo:
+        return f"{linea}\n🎉 ¡Lo completaste! Llevás {_formatear_monto(aportado, moneda)}."
+    return (
+        f"{linea}\nVas {porcentaje}%, te faltan {_formatear_monto(falta, moneda)} "
+        f"de {_formatear_monto(meta, moneda)}."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -307,11 +488,17 @@ def _formatear_monto(monto: Decimal, moneda: Moneda) -> str:
 
 
 def _confirmacion(movimiento: Movimiento) -> str:
-    """Ej: '✅ Gasto de $8.500 en supermercado registrado (03/08)'."""
+    """Ej: '✅ Gasto de $8.500 en supermercado registrado (03/08)'.
+
+    Con cuenta: '✅ Ahorro de $50.000 en plazo fijo registrado (04/08) · banco'.
+    Se muestra solo cuando el usuario la dijo, para que se vea que quedó
+    anotada y no haya que ir a mirar la base para saberlo.
+    """
     etiqueta = _ETIQUETA_TIPO[movimiento.tipo.value][0]
+    cuenta = f" · {movimiento.cuenta}" if movimiento.cuenta else ""
     return (
         f"✅ {etiqueta} de {_formatear_monto(movimiento.monto, movimiento.moneda)} "
-        f"en {movimiento.categoria} registrado ({movimiento.fecha:%d/%m})"
+        f"en {movimiento.categoria} registrado ({movimiento.fecha:%d/%m}){cuenta}"
     )
 
 

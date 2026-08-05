@@ -32,8 +32,15 @@ dist/
 .coverage
 htmlcov/
 
-# Binarios de terceros (cloudflared para el túnel de desarrollo)
-tools/
+# Binarios de terceros (cloudflared para el túnel de desarrollo).
+#
+# Va `tools/*` y no `tools/`: si se excluye el DIRECTORIO, git ya no mira lo
+# que hay adentro y las excepciones de abajo no tienen efecto. Excluyendo el
+# contenido, sí se pueden re-incluir los scripts propios, que tienen que estar
+# en el repo —sin el generador, los íconos de la PWA no se podrían rehacer.
+tools/*
+!tools/*.mjs
+!tools/*.py
 
 # Editores / sistema operativo
 .vscode/

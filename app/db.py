@@ -25,12 +25,13 @@ from typing import Any
 from postgrest import APIError
 from supabase import Client, create_client
 
-from app.config import SUPABASE_KEY, SUPABASE_URL
+from app.config import SUPABASE_KEY, SUPABASE_URL, SUPABASE_USER_ID
 from app.models import Moneda, Movimiento, TipoMovimiento
 
 logger = logging.getLogger(__name__)
 
 TABLA = "movimientos"
+TABLA_OBJETIVOS = "objetivos"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -167,10 +168,15 @@ def init_db() -> None:
         raise DBError(f"No pude conectarme a Supabase ({SUPABASE_URL}).") from exc
 
 
-def guardar_movimiento(movimiento: Movimiento) -> int:
+def guardar_movimiento(movimiento: Movimiento, objetivo_id: str | None = None) -> int:
     """Inserta un Movimiento y devuelve el id asignado.
 
     `created_at` lo pone Postgres solo (DEFAULT now()).
+
+    `objetivo_id` se pasa cuando el ahorro ya se pudo imputar en el momento. Si
+    hay que preguntar primero, el movimiento se guarda igual sin él y después
+    se imputa con `imputar_movimiento`: la plata se apartó, y perder el
+    registro por una duda sobre a qué objetivo va sería el peor negocio.
     """
     fila = {
         "fecha": movimiento.fecha.isoformat(),
@@ -181,6 +187,10 @@ def guardar_movimiento(movimiento: Movimiento) -> int:
         "moneda": movimiento.moneda.value,
         "categoria": movimiento.categoria,
         "descripcion": movimiento.descripcion,
+        # None viaja como null y la columna queda vacía, que es lo que
+        # corresponde cuando el usuario no dijo dónde guardó la plata.
+        "cuenta": movimiento.cuenta,
+        "objetivo_id": objetivo_id,
     }
 
     try:
@@ -196,6 +206,124 @@ def guardar_movimiento(movimiento: Movimiento) -> int:
     if not respuesta.data:
         raise DBError("El insert no devolvió la fila creada.")
     return int(respuesta.data[0]["id"])
+
+
+# --------------------------------------------------------------------------
+# Objetivos de ahorro
+# --------------------------------------------------------------------------
+#
+# El bot escribe con la clave service_role, que saltea RLS. Eso trae dos cosas
+# que hay que tener presentes:
+#
+# 1. Al leer ve los objetivos de TODOS los usuarios. Por eso se filtra por
+#    SUPABASE_USER_ID cuando está configurado.
+# 2. Al insertar, el `default auth.uid()` de la columna user_id devuelve null
+#    —no hay sesión de nadie—, y la columna es NOT NULL. Así que el user_id hay
+#    que mandarlo explícito, y sin SUPABASE_USER_ID no se pueden crear.
+
+
+def obtener_objetivos(*, solo_activos: bool = True) -> list[dict]:
+    """Los objetivos del usuario, para buscar a cuál imputar un ahorro."""
+    cliente = _obtener_cliente()
+    consulta = cliente.table(TABLA_OBJETIVOS).select("id, nombre, monto_objetivo, moneda, estado")
+
+    if SUPABASE_USER_ID:
+        consulta = consulta.eq("user_id", SUPABASE_USER_ID)
+    if solo_activos:
+        # Los completados y pausados no se ofrecen: sumarle a algo terminado
+        # casi nunca es lo que se quiso decir.
+        consulta = consulta.eq("estado", "activo")
+
+    try:
+        return consulta.execute().data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la consulta de objetivos: %s", detalle)
+        raise DBError(f"Error consultando los objetivos: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando objetivos")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def crear_objetivo(*, nombre: str, monto_objetivo: Decimal, moneda: Moneda) -> dict:
+    """Crea un objetivo y devuelve la fila.
+
+    Raises:
+        DBError: si no hay SUPABASE_USER_ID configurado. Sin él la fila no
+            tendría dueño y Postgres la rechazaría por el NOT NULL.
+    """
+    if not SUPABASE_USER_ID:
+        raise DBError(
+            "No puedo crear objetivos: falta configurar SUPABASE_USER_ID. "
+            "Se crean desde la web."
+        )
+
+    fila = {
+        "user_id": SUPABASE_USER_ID,
+        "nombre": nombre,
+        "monto_objetivo": str(monto_objetivo),
+        "moneda": moneda.value,
+    }
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_OBJETIVOS).insert(fila).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el objetivo: %s", detalle)
+        raise DBError(f"No pude crear el objetivo: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red creando el objetivo")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El insert del objetivo no devolvió la fila creada.")
+    return respuesta.data[0]
+
+
+def imputar_movimiento(movimiento_id: int, objetivo_id: str) -> None:
+    """Le asigna un objetivo a un movimiento ya guardado."""
+    try:
+        _obtener_cliente().table(TABLA).update({"objetivo_id": objetivo_id}).eq(
+            "id", movimiento_id
+        ).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la imputación: %s", detalle)
+        raise DBError(f"No pude imputar el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red imputando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def total_imputado(objetivo_id: str, moneda: Moneda) -> Decimal:
+    """Cuánto se lleva ahorrado para un objetivo, en su moneda.
+
+    El filtro por moneda no es un detalle: un aporte de US$400 imputado a una
+    meta en pesos sumaría 400 sobre 500.000.
+    """
+    filas = _seleccionar_imputados(objetivo_id, moneda)
+    return sum((_a_decimal(f["monto"]) for f in filas), Decimal("0"))
+
+
+def _seleccionar_imputados(objetivo_id: str, moneda: Moneda) -> list[dict]:
+    cliente = _obtener_cliente()
+    try:
+        return (
+            cliente.table(TABLA)
+            .select("monto")
+            .eq("objetivo_id", objetivo_id)
+            .eq("moneda", moneda.value)
+            .eq("tipo", TipoMovimiento.AHORRO.value)
+            .execute()
+            .data
+            or []
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"Error consultando el progreso: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando el progreso")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
 class Total:
@@ -338,6 +466,10 @@ def obtener_movimientos(
             moneda=registro["moneda"],
             categoria=registro["categoria"],
             descripcion=registro["descripcion"],
+            # .get() y no [...]: si todavía no se corrió el ALTER TABLE, la
+            # columna no viene en la respuesta y leer movimientos viejos no
+            # tiene por qué romperse.
+            cuenta=registro.get("cuenta"),
         )
         resultados.append(registro)
     return resultados

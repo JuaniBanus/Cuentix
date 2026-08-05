@@ -58,6 +58,13 @@ class _MovimientoExtraido(BaseModel):
     moneda: Moneda = Moneda.ARS
     categoria: str
     descripcion: str
+    # Opcional de verdad: el modelo tiene que poder no contestarla. Si fuera
+    # `str` con default "", el schema la pediría igual y el modelo llenaría el
+    # hueco con lo primero que le suene.
+    cuenta: str | None = None
+    # PARA QUÉ se aparta la plata, cuando el usuario nombra una meta. No es una
+    # columna: es el texto con el que después se busca el objetivo.
+    objetivo: str | None = None
 
 
 class _ConsultaExtraida(BaseModel):
@@ -81,6 +88,10 @@ class Interpretacion(NamedTuple):
     intencion: Intencion
     movimiento: Movimiento | None = None
     consulta: Consulta | None = None
+    # A qué objetivo dijo el usuario que va el ahorro, con sus palabras. Viaja
+    # aparte del Movimiento porque no es un dato de la tabla: es la pista para
+    # buscar el objetivo, y puede no encontrar ninguno.
+    objetivo: str | None = None
 
 
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -152,6 +163,44 @@ CATEGORIA
   cripto, plazo fijo, otros.
 - Si nada encaja, usá "otros".
 
+CUENTA (dónde está la plata)
+- Completala SOLO si el mensaje dice dónde quedó, de dónde salió o a dónde fue
+  la plata: "guardé 50 lucas en el banco" -> banco, "aparté efectivo" ->
+  efectivo, "lo puse en Mercado Pago" -> billetera virtual, "50 mil al cajón"
+  -> efectivo.
+- Si el mensaje NO lo dice, dejala en null. Nunca la deduzcas del tipo, de la
+  categoría ni de lo habitual: un null es la respuesta correcta cuando el
+  usuario no lo mencionó, y es mejor que un lugar inventado.
+  "aparté 50 mil para el viaje" -> cuenta=null. "gasté 8 lucas en el super"
+  -> cuenta=null.
+- No la confundas con la categoría, que es PARA QUE es la plata:
+  "puse 100 lucas en un plazo fijo del banco" -> categoria="plazo fijo",
+  cuenta="banco". "hice un plazo fijo" -> categoria="plazo fijo", cuenta=null.
+- Etiquetas preferidas: efectivo, banco, billetera virtual, caja de seguridad,
+  broker, cripto. Si nombran una marca o un producto, usá la etiqueta general:
+  mercado pago / ualá / prex / naranja x -> billetera virtual;
+  caja de ahorro / cuenta sueldo / homebanking / nombre de un banco -> banco;
+  binance / lemon / buenbit -> cripto; cocos / iol / balanz -> broker;
+  el cajón / abajo del colchón / la lata -> efectivo.
+- Si no encaja en ninguna, usá una o dos palabras en minúsculas y sin tildes.
+
+OBJETIVO (para qué se aparta la plata)
+- SOLO para tipo=ahorro, y solo si el mensaje nombra una meta concreta:
+  "guardé 150 mil para el viaje a Europa" -> objetivo="viaje a Europa"
+  "aparté 50 lucas para el auto" -> objetivo="auto"
+  "puse 20 mil para la casa" -> objetivo="casa"
+- Devolvé el nombre de la meta tal como la nombró el usuario, SIN "para",
+  "el", "la" ni el verbo. No inventes ni completes: si dijo "el auto",
+  poné "auto", no "auto nuevo".
+- En cualquier otro caso, null. Que un gasto o un ingreso tengan un motivo no
+  los convierte en un objetivo: "gasté 8 lucas en el super" -> null,
+  "cobré el sueldo" -> null.
+- Ahorrar sin decir para qué también es null: "aparté 50 lucas" -> null,
+  "guardé plata en el banco" -> null.
+- No lo confundas con la cuenta, que es DÓNDE está la plata:
+  "guardé 50 mil en el banco para el viaje" -> cuenta="banco",
+  objetivo="viaje".
+
 DESCRIPCION
 - Una etiqueta de 2 a 5 palabras que diga QUE se compró o de dónde salió la
   plata, para distinguir dos movimientos de la misma categoría el mismo día.
@@ -193,6 +242,45 @@ Poné intencion="desconocida" con los dos objetos en null. Usalo para saludos,
 charla suelta o mensajes que no se entienden. No fuerces un registro."""
 
 
+# Lo que un modelo escribe cuando le pedimos null y contesta con palabras.
+# Cualquiera de estas es un "no lo dijo", no el nombre de una cuenta.
+_CUENTA_VACIA = frozenset(
+    {
+        "null",
+        "none",
+        "nada",
+        "ninguna",
+        "ninguno",
+        "n/a",
+        "na",
+        "no aplica",
+        "no especifica",
+        "no especificado",
+        "no especificada",
+        "no menciona",
+        "no mencionada",
+        "sin especificar",
+        "desconocida",
+        "desconocido",
+        "-",
+    }
+)
+
+
+def _normalizar_cuenta(valor: str | None) -> str | None:
+    """Deja la cuenta lista para guardar, o None si no hay nada que guardar.
+
+    El prompt pide null cuando el usuario no dice dónde, pero un modelo a veces
+    contesta "no especificado" en vez de un null de verdad. Eso entraría a la
+    base como si fuera una cuenta más y ensuciaría cualquier agrupación futura,
+    así que se filtra acá.
+    """
+    limpio = " ".join((valor or "").split()).lower()[:40].strip()
+    if not limpio or limpio in _CUENTA_VACIA:
+        return None
+    return limpio
+
+
 def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
     """Convierte la salida de Gemini en el Movimiento definitivo.
 
@@ -226,6 +314,7 @@ def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
             # pero válido: mejor eso que perder el movimiento por un campo
             # que no se muestra en ninguna respuesta.
             descripcion=descripcion or categoria,
+            cuenta=_normalizar_cuenta(extraido.cuenta),
         )
     except ValidationError as exc:
         # Típicamente: monto <= 0 o categoria vacía.
@@ -310,9 +399,15 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             # Dijo "registrar" pero no mandó los datos: tratamos como no entendido.
             logger.warning("Intención registrar sin movimiento para %r", texto)
             raise ParserError("Dijo registrar pero no extrajo el movimiento.")
+        mencion = " ".join((extraida.movimiento.objetivo or "").split()).strip()
         return Interpretacion(
             intencion=Intencion.REGISTRAR,
             movimiento=_a_movimiento(extraida.movimiento),
+            # Solo tiene sentido para los ahorros; en el resto se descarta
+            # aunque el modelo la haya completado.
+            objetivo=mencion or None
+            if extraida.movimiento.tipo is TipoMovimiento.AHORRO
+            else None,
         )
 
     if extraida.intencion is Intencion.DESCONOCIDA:
