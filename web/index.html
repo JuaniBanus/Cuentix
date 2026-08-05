@@ -5,10 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#161826">
 <title>Cuentix</title>
+
+<!-- El tema se decide acá, en un script que bloquea el pintado, y no en un
+     módulo: los módulos corren después del primer render, así que quien eligió
+     tema claro vería un fogonazo oscuro en cada carga. Son las únicas líneas de
+     JS que no viven en js/ y el único lugar donde se repite la clave. -->
+<script>
+  (function () {
+    var tema;
+    try { tema = localStorage.getItem("cuentix:tema"); } catch (e) {}
+    if (tema !== "claro" && tema !== "oscuro") {
+      // Sin preferencia guardada, arranca como esté el sistema.
+      tema = matchMedia("(prefers-color-scheme: light)").matches ? "claro" : "oscuro";
+    }
+    document.documentElement.dataset.tema = tema;
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
+
+<!-- PWA. El manifest es lo que habilita "Instalar app" en el navegador. -->
+<link rel="manifest" href="manifest.json">
+<!-- iOS ignora el manifest para el ícono de la pantalla de inicio. -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icono-192.png" type="image/png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cuentix">
 </head>
 <body>
 
@@ -23,6 +47,14 @@
     <g id="i-ojo"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
     <g id="i-ojo-tachado"><path d="M2 12s3.6-6.5 10-6.5c2 0 3.7.6 5.2 1.5M22 12s-3.6 6.5-10 6.5c-2 0-3.8-.6-5.2-1.5"/><path d="M4 4l16 16"/></g>
     <g id="i-salir"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/></g>
+    <g id="i-usuario"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></g>
+    <g id="i-sin-senal"><path d="M5 12.5a9.5 9.5 0 0 1 4-2.3M15.5 10.6a9.5 9.5 0 0 1 3.5 1.9"/><path d="M8.5 16a5.5 5.5 0 0 1 7 0"/><path d="M12 20h.01"/><path d="M3 3l18 18"/></g>
+    <g id="i-aviso"><path d="M12 4.5 21 19H3z"/><path d="M12 10v4M12 16.5h.01"/></g>
+    <g id="i-calendario"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3"/></g>
+    <g id="i-izquierda"><path d="M14.5 6.5 9 12l5.5 5.5"/></g>
+    <g id="i-derecha"><path d="M9.5 6.5 15 12l-5.5 5.5"/></g>
+    <g id="i-mas"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-basura"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12"/><path d="M10 11v6M14 11v6"/></g>
   </defs>
 </svg>
 
@@ -59,31 +91,29 @@
   <header class="cabecera">
     <p class="marca">Cuentix</p>
     <div class="cabecera-acciones">
+      <!-- El selector vive en el encabezado y no adentro de una pantalla: el
+           período vale para las cuatro y no se pierde al cambiar de tab. -->
+      <button id="btn-periodo" class="boton-periodo" aria-expanded="false" aria-controls="panel-periodo">
+        <svg viewBox="0 0 24 24" class="icono"><use href="#i-calendario"></use></svg>
+        <span id="periodo-etiqueta">mes</span>
+      </button>
+      <!-- Convierte lo que se muestra al dólar oficial. Arranca desactivado y
+           se habilita cuando llega la cotización. -->
+      <button id="btn-dolar" class="boton-icono es-texto" aria-pressed="false"
+              aria-label="Ver todo en dólares" title="Ver todo en dólares" disabled>US$</button>
       <button id="btn-ojo" class="boton-icono" aria-pressed="false" aria-label="Ocultar montos">
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-ojo"></use></svg>
       </button>
-      <button id="btn-salir" class="boton-icono" aria-label="Cerrar sesión">
-        <svg viewBox="0 0 24 24" class="icono"><use href="#i-salir"></use></svg>
-      </button>
     </div>
+
+    <div id="panel-periodo" class="panel" hidden></div>
   </header>
 
   <main id="contenido" class="contenido"></main>
 
-  <nav class="tabs" aria-label="Secciones">
-    <button class="tab es-activo" data-tab="inicio" aria-current="page">
-      <svg viewBox="0 0 24 24" class="icono"><use href="#i-casa"></use></svg><span>Inicio</span>
-    </button>
-    <button class="tab" data-tab="gastos" aria-current="false">
-      <svg viewBox="0 0 24 24" class="icono"><use href="#i-gastos"></use></svg><span>Gastos</span>
-    </button>
-    <button class="tab" data-tab="ahorros" aria-current="false">
-      <svg viewBox="0 0 24 24" class="icono"><use href="#i-ahorro"></use></svg><span>Ahorros</span>
-    </button>
-    <button class="tab" data-tab="inversiones" aria-current="false">
-      <svg viewBox="0 0 24 24" class="icono"><use href="#i-inversion"></use></svg><span>Inversiones</span>
-    </button>
-  </nav>
+  <!-- Los botones los dibuja router.js a partir de TABS, que es la única lista
+       de secciones que existe. -->
+  <nav id="tabs" class="tabs" aria-label="Secciones"></nav>
 </div>
 
 <script type="module" src="js/app.js"></script>

@@ -1,27 +1,102 @@
-/* Cuentix — tema Nocturne. Mobile-first: columna angosta centrada. */
+/* Cuentix — dos temas sobre los mismos tokens. Mobile-first: columna angosta.
+ *
+ * Ningún color se escribe fuera de este bloque: todo lo que pinta usa una
+ * variable. Cambiar de tema es cambiar este set, no repasar la hoja entera.
+ *
+ * Los tokens son semánticos (qué papel cumple el color), no descriptivos: por
+ * eso --acento-tinta es un violeta claro en oscuro y uno oscuro en claro. Si se
+ * llamara --acento-claro, en tema claro diría exactamente lo contrario de lo
+ * que hace.
+ */
 
 :root {
-  --fondo: #161826;
-  --superficie: #232532;
-  --texto: #e9e9ed;
-  --tenue: #9397ab;
-  --tenue-2: #75798c;
-
-  --acento: #9184d9;
-  --acento-claro: #b5abfc;
-  --acento-medio: #968ae0;
-  --acento-oscuro: #796cbf;
-  --acento-palido: #d2cefd;
-  --acento-profundo: #5d5294;
-
-  --borde: rgba(233, 233, 237, .12);
-  --borde-fuerte: rgba(233, 233, 237, .2);
-
   --r-tarjeta: 14px;
   --r-boton: 8px;
 
   --ancho: 480px;
   --alto-tabs: 62px;
+}
+
+/* ------------------------------------------------- Tema oscuro (Nocturne) */
+/* Sin atributo también manda este: es el tema por defecto de la marca. */
+
+:root, :root[data-tema="oscuro"] {
+  color-scheme: dark;
+
+  --fondo: #161826;
+  --superficie: #232532;
+
+  --texto: #e9e9ed;
+  --tenue: #9397ab;
+  /* Antes #75798c, que sobre la tarjeta daba 3.5:1 y dejaba los subtítulos de
+     12px por debajo del mínimo legible. Este llega a 4.7:1. */
+  --tenue-2: #8a8ea3;
+
+  --acento: #9184d9;          /* la marca, igual en los dos temas */
+  --acento-tinta: #b5abfc;    /* acento cuando es texto o ícono */
+  --acento-suave: rgba(145, 132, 217, .14);
+
+  --borde: rgba(233, 233, 237, .12);
+  --borde-fuerte: rgba(233, 233, 237, .2);
+  /* Los campos del login llevan borde propio: es lo único que dice dónde
+     empieza y termina el recuadro donde se escribe. */
+  --borde-campo: rgba(233, 233, 237, .3);
+  --realce: rgba(233, 233, 237, .05);
+
+  --error: #ff9a9a;
+  --sombra: none;
+  --sombra-panel: 0 12px 32px rgba(0, 0, 0, .45);
+
+  /* Dona: seis tonos a la misma luminosidad, validados contra la tarjeta. */
+  --cat-1: #9184d9;
+  --cat-2: #05a085;
+  --cat-3: #c27405;
+  --cat-4: #d05a8e;
+  --cat-5: #0290e1;
+  --cat-6: #689b1e;
+  --cat-otros: #75798c;
+}
+
+/* -------------------------------------------------------- Tema claro */
+/* No es el oscuro invertido: los tonos de la dona se rebajaron para que se
+   sostengan sobre blanco, y las tintas se oscurecieron hasta pasar 4.5:1. */
+
+:root[data-tema="claro"] {
+  color-scheme: light;
+
+  --fondo: #f2f2f7;           /* gris con una gota de violeta, no blanco puro */
+  --superficie: #ffffff;
+
+  --texto: #1c1d29;
+  --tenue: #5b5e72;
+  --tenue-2: #6b6e83;
+
+  --acento: #9184d9;
+  /* El violeta de marca sobre blanco da 3.2:1: alcanza para un borde, no para
+     una cifra. Como texto va este, que llega a 6:1. */
+  --acento-tinta: #5b4bb5;
+  --acento-suave: rgba(145, 132, 217, .16);
+
+  --borde: rgba(28, 29, 41, .12);
+  --borde-fuerte: rgba(28, 29, 41, .34);
+  /* Más marcado que en oscuro: un campo blanco sobre un fondo casi blanco no se
+     distingue por el relleno, solo por el borde. Este llega a 3.4:1. */
+  --borde-campo: rgba(28, 29, 41, .55);
+  --realce: rgba(28, 29, 41, .05);
+
+  --error: #b3261e;
+  /* Tarjeta blanca sobre fondo casi blanco: sin una sombra mínima el borde de
+     la tarjeta desaparece. */
+  --sombra: 0 1px 2px rgba(28, 29, 41, .06);
+  --sombra-panel: 0 12px 32px rgba(28, 29, 41, .16);
+
+  --cat-1: #6f5fc9;
+  --cat-2: #008970;
+  --cat-3: #8f5a00;
+  --cat-4: #b03f76;
+  --cat-5: #0071b8;
+  --cat-6: #4d7a12;
+  --cat-otros: #6f7285;
 }
 
 * { box-sizing: border-box; }
@@ -48,6 +123,13 @@ p { margin: 0; }
 ul { list-style: none; margin: 0; padding: 0; }
 
 button { font: inherit; color: inherit; cursor: pointer; }
+
+/* Un solo anillo de foco para todo lo que se puede tabular. Solo aparece con
+   teclado, nunca al hacer clic. */
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--acento-tinta);
+  outline-offset: 2px;
+}
 
 /* Todo lo que sea un número lleva cifras de ancho fijo: sin esto, las columnas
    de montos bailan de una fila a otra. */
@@ -81,9 +163,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: var(--r-tarjeta);
+  box-shadow: var(--sombra);
   padding: 16px;
 }
 
+.pantalla-titulo { font-size: 24px; letter-spacing: -.02em; margin-bottom: 2px; }
 .tarjeta-titulo { font-size: 14px; color: var(--tenue); margin-bottom: 12px; }
 .tarjeta-mini { padding: 14px; display: flex; flex-direction: column; gap: 2px; }
 .grilla-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -97,15 +181,42 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 38px; font-weight: 600; letter-spacing: -.03em;
   line-height: 1.1; margin: 2px 0 2px;
 }
-.cifra-heroe.es-negativo { color: var(--acento-claro); }
+.cifra-heroe.es-negativo { color: var(--acento-tinta); }
 .cifra-media { font-size: 21px; font-weight: 600; letter-spacing: -.02em; }
+
+/* Para las tarjetas cuyo dato es un nombre de categoría y no un número. */
+.valor-texto {
+  font-size: 16px; font-weight: 500; letter-spacing: -.01em;
+  overflow-wrap: anywhere;
+}
+
+.variacion {
+  display: flex; align-items: baseline; gap: 5px;
+  font-size: 13px; color: var(--tenue);
+}
 
 .vacio {
   color: var(--tenue-2); font-size: 14px; text-align: left;
   padding: 22px 2px; line-height: 1.6;
 }
 .cargando { color: var(--tenue-2); padding: 40px 2px; }
-.error { color: #ff9a9a; font-size: 13px; min-height: 18px; }
+.error { color: var(--error); font-size: 13px; min-height: 18px; }
+
+/* Aviso de "no se pudo": ocupa el lugar del contenido, no lo tapa. */
+.aviso {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; text-align: center;
+  margin-top: 8px;
+  padding: 30px 20px;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--r-tarjeta);
+  box-shadow: var(--sombra);
+}
+.aviso-icono { width: 26px; height: 26px; color: var(--tenue); margin-bottom: 6px; }
+.aviso-titulo { font-weight: 500; }
+/* El botón acá no va a lo ancho: es una salida, no la acción principal. */
+.aviso-boton { width: auto; margin-top: 16px; padding: 9px 22px; }
 
 /* ---------------------------------------------------------------- Botones */
 
@@ -119,9 +230,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-weight: 500;
   transition: border-color .15s, background .15s;
 }
-.boton-acento { border-color: var(--acento); color: var(--acento-palido); }
-.boton-acento:hover:not(:disabled) { background: rgba(145, 132, 217, .1); }
+.boton-acento { border-color: var(--acento); color: var(--acento-tinta); }
+.boton-acento:hover:not(:disabled) { background: var(--acento-suave); }
 .boton:disabled { opacity: .5; cursor: default; }
+
+.boton-con-icono {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: var(--tenue);
+}
+.boton-con-icono:hover { color: var(--texto); border-color: var(--borde-fuerte); }
+
+/* Volver del detalle de una categoría. Sin recuadro: es navegación, no acción. */
+.boton-volver {
+  display: inline-flex; align-items: center; gap: 4px;
+  align-self: flex-start;
+  margin: 0 0 6px -6px;
+  padding: 4px 6px;
+  background: transparent; border: 0;
+  border-radius: var(--r-boton);
+  color: var(--tenue); font-size: 13px; font-weight: 500;
+  transition: color .15s;
+}
+.boton-volver:hover { color: var(--texto); }
+.boton-volver .icono { width: 16px; height: 16px; }
 
 .boton-icono {
   display: grid; place-items: center;
@@ -133,7 +264,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: color .15s, border-color .15s;
 }
 .boton-icono:hover { color: var(--texto); }
-.boton-icono.es-activo { color: var(--acento-claro); border-color: var(--acento); }
+.boton-icono.es-activo { color: var(--acento-tinta); border-color: var(--acento); }
+.boton-icono:disabled { opacity: .4; cursor: default; }
+.boton-icono:disabled:hover { color: var(--tenue); }
+/* El de dólares lleva texto en vez de ícono. */
+.boton-icono.es-texto { width: auto; padding: 0 9px; font-size: 11.5px; font-weight: 600; }
 
 .icono {
   width: 20px; height: 20px;
@@ -149,7 +284,238 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-radius: var(--r-boton);
   color: var(--tenue); font-size: 13px; font-weight: 500;
 }
-.chip.es-activo { color: var(--acento-palido); border-color: var(--acento); }
+.chip.es-activo { color: var(--acento-tinta); border-color: var(--acento); }
+
+/* -------------------------------------------------------- Selector de período */
+
+.boton-periodo {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; max-width: 46vw;
+  padding: 0 11px;
+  background: transparent;
+  border: 1px solid var(--borde);
+  border-radius: var(--r-boton);
+  color: var(--tenue); font-size: 13px; font-weight: 500;
+  transition: color .15s, border-color .15s;
+}
+.boton-periodo:hover { color: var(--texto); }
+.boton-periodo[aria-expanded="true"] { color: var(--acento-tinta); border-color: var(--acento); }
+.boton-periodo .icono { width: 16px; height: 16px; flex: none; }
+/* Un rango largo no puede empujar al ojo fuera de la pantalla. */
+.boton-periodo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Colgado del encabezado, que es sticky y por eso sirve de ancla. */
+.panel {
+  position: absolute; top: calc(100% - 2px); right: 18px; z-index: 20;
+  width: min(304px, calc(100vw - 36px));
+  padding: 14px;
+  background: var(--superficie);
+  border: 1px solid var(--borde-fuerte);
+  border-radius: var(--r-tarjeta);
+  box-shadow: var(--sombra-panel);
+}
+
+.panel-modos { display: flex; gap: 6px; margin-bottom: 14px; }
+
+.panel-anio {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.panel-anio-numero { font-weight: 500; font-variant-numeric: tabular-nums; }
+.panel-anio .boton-icono { width: 32px; height: 32px; }
+
+.panel-meses { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.mes {
+  padding: 9px 4px;
+  background: transparent;
+  border: 1px solid var(--borde);
+  border-radius: var(--r-boton);
+  color: var(--tenue); font-size: 13px; font-weight: 500;
+  transition: color .15s, border-color .15s;
+}
+.mes:hover { color: var(--texto); }
+/* El mes en curso se marca aunque no sea el elegido: ubica al que se fue lejos. */
+.mes.es-hoy { border-color: var(--borde-fuerte); color: var(--texto); }
+.mes.es-activo {
+  color: var(--acento-tinta);
+  border-color: var(--acento);
+  background: var(--acento-suave);
+}
+
+.panel-rango .campo { margin-bottom: 12px; }
+
+/* ------------------------------------------------------------------ Barras */
+
+.barras { display: flex; flex-direction: column; gap: 4px; }
+.barra {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; gap: 5px 10px;
+  padding: 7px 0;
+}
+
+/* La barra como botón: abre el detalle de la categoría. */
+.barra-tocable {
+  /* El margen negativo hace que el resaltado del toque llegue hasta el borde
+     interno de la tarjeta, en vez de cortarse a media pulgada. */
+  margin: 0 -8px;
+  width: calc(100% + 16px);
+  padding: 8px;
+  background: transparent; border: 0;
+  border-radius: var(--r-boton);
+  text-align: left;
+  transition: background .15s;
+}
+.barra-tocable:hover { background: var(--realce); }
+.barra-nombre {
+  font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.barra-monto { font-size: 14px; font-weight: 500; }
+.barra-riel {
+  display: block; height: 8px;
+  border-radius: 4px;
+  background: var(--realce);
+  overflow: hidden;
+}
+.barra-relleno { display: block; height: 100%; border-radius: 4px; }
+.barra-pct { font-size: 13px; color: var(--tenue-2); text-align: right; }
+/* "sin especificar" no es un lugar: se muestra apagado para que no compita con
+   los que sí lo son. */
+.barra-nombre.es-tenue { color: var(--tenue-2); }
+
+.tarjeta-pie { margin-top: 12px; }
+
+/* -------------------------------------------------------------- Objetivos */
+
+.tarjeta-cabecera {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 12px;
+}
+.tarjeta-cabecera .tarjeta-titulo { margin-bottom: 0; }
+.tarjeta-cabecera .boton-icono { width: 30px; height: 30px; }
+.tarjeta-cabecera .icono { width: 17px; height: 17px; }
+
+.objetivos { display: flex; flex-direction: column; gap: 2px; }
+
+/* Una grilla de dos columnas: el ícono a la izquierda ocupando todas las
+   filas, y el resto apilado a la derecha. */
+.objetivo {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 3px 11px;
+  width: calc(100% + 16px); margin: 0 -8px;
+  padding: 11px 8px;
+  background: transparent; border: 0;
+  border-radius: var(--r-boton);
+  text-align: left;
+  transition: background .15s;
+}
+.objetivo:hover { background: var(--realce); }
+/* Terminado: sigue a la vista pero deja de pedir atención. */
+.objetivo.es-completado { opacity: .62; }
+
+.objetivo-icono {
+  grid-row: 1 / 4;
+  display: grid; place-items: center;
+  width: 36px; height: 36px;
+  border: 1px solid;
+  border-radius: 11px;
+  font-size: 17px; line-height: 1;
+}
+.objetivo-nombre { font-size: 14.5px; font-weight: 500; }
+.objetivo-etiquetas { display: flex; gap: 5px; justify-self: end; }
+.objetivo-barra { grid-column: 2 / 4; margin: 3px 0 1px; }
+.objetivo-cifras { grid-column: 2; font-size: 13px; }
+.objetivo-pie { grid-column: 2 / 4; font-size: 12px; }
+
+/* Tejuelo: la etiquetita de prioridad y estado. */
+.tejuelo {
+  padding: 2px 7px;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  color: var(--tenue-2); font-size: 10.5px; font-weight: 500;
+  white-space: nowrap;
+}
+/* Solo la prioridad alta se marca. Pintar las tres sería no marcar ninguna. */
+.tejuelo-alta { color: var(--acento-tinta); border-color: var(--acento); }
+
+/* ------------------------------------------------- Formulario de objetivo */
+
+.form-objetivo { display: flex; flex-direction: column; }
+.form-objetivo .campo { margin-bottom: 15px; }
+.form-objetivo .campo > span { display: block; margin-bottom: 6px; font-size: 13px; color: var(--tenue); }
+.form-objetivo .chips { margin-bottom: 0; }
+.form-objetivo textarea {
+  padding: 11px 13px;
+  background: var(--superficie);
+  border: 1px solid var(--borde-campo);
+  border-radius: var(--r-boton);
+  color: var(--texto); font: inherit; resize: vertical;
+}
+.form-objetivo textarea:focus { outline: none; border-color: var(--acento); }
+
+.grilla-iconos { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.icono-opcion {
+  aspect-ratio: 1;
+  background: transparent;
+  border: 1px solid var(--borde);
+  border-radius: var(--r-boton);
+  font-size: 18px; line-height: 1;
+}
+.icono-opcion.es-activo { border-color: var(--acento); background: var(--acento-suave); }
+
+.grilla-colores { display: flex; gap: 8px; flex-wrap: wrap; }
+.color-opcion {
+  width: 30px; height: 30px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  /* El anillo del color de la superficie separa el borde de acento del relleno,
+     para que se vea cuál está elegido también en el tema claro. */
+  box-shadow: 0 0 0 2px var(--superficie) inset;
+}
+.color-opcion.es-activo { border-color: var(--texto); }
+
+.boton-peligro { border-color: var(--error); color: var(--error); }
+.confirmar { display: flex; flex-direction: column; gap: 10px; }
+.confirmar-botones { display: flex; gap: 8px; }
+
+/* ------------------------------------------------------------------ Línea */
+
+.linea-lectura {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.linea-valor { font-size: 20px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+
+.linea-svg {
+  display: block; width: 100%; height: auto;
+  overflow: visible; /* el punto del último día se sale del viewBox */
+  touch-action: pan-y; /* recorrer el gráfico no puede trabar el scroll */
+}
+.linea-svg:focus-visible { outline: 2px solid var(--acento-tinta); outline-offset: 4px; }
+
+/* Un tono por encima de la superficie y sólida: punteada se leería como
+   "proyección" cuando es apenas una referencia. */
+.linea-grilla { stroke: var(--borde); stroke-width: 1; }
+
+.linea-trazo {
+  fill: none;
+  stroke: var(--cat-1);
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+/* Un lavado, nunca un bloque saturado. */
+.linea-area { fill: var(--cat-1); fill-opacity: .1; stroke: none; }
+
+.linea-cruz { stroke: var(--borde-fuerte); stroke-width: 1; }
+/* El anillo del color de la superficie mantiene el punto legible donde cruza
+   la línea. */
+.linea-punto { fill: var(--cat-1); stroke: var(--superficie); stroke-width: 2; }
+
+.linea-eje {
+  display: flex; justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px; color: var(--tenue-2);
+}
 
 /* ------------------------------------------------------------------- Dona */
 
@@ -164,7 +530,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   cursor: pointer;
   transition: stroke-width .18s, opacity .18s;
 }
-.dona-gajo:focus-visible { outline: 2px solid var(--acento-palido); outline-offset: 2px; }
+.dona-gajo:focus-visible { outline: 2px solid var(--acento-tinta); outline-offset: 2px; }
 .dona-gajo.es-tenue { opacity: .35; }
 
 .dona-centro {
@@ -186,7 +552,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   cursor: pointer;
   transition: background .15s;
 }
-.leyenda-fila:hover, .leyenda-fila.es-activo { background: rgba(233, 233, 237, .05); }
+.leyenda-fila:hover, .leyenda-fila.es-activo { background: var(--realce); }
 .leyenda-punto { width: 10px; height: 10px; border-radius: 3px; }
 .leyenda-nombre { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leyenda-monto { font-size: 14px; font-weight: 500; }
@@ -207,9 +573,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: grid; place-items: center;
   width: 34px; height: 34px;
   border-radius: var(--r-boton);
-  background: rgba(145, 132, 217, .14);
+  background: var(--acento-suave);
   border: 1px solid var(--borde);
-  color: var(--acento-claro); font-size: 14px; font-weight: 500;
+  color: var(--acento-tinta); font-size: 14px; font-weight: 500;
 }
 .movimiento-texto { display: flex; flex-direction: column; min-width: 0; }
 .movimiento-titulo {
@@ -217,13 +583,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .movimiento-sub { font-size: 12.5px; color: var(--tenue-2); }
 .movimiento-monto { font-size: 14.5px; font-weight: 500; }
-.movimiento-monto.es-ingreso { color: var(--acento-claro); }
+.movimiento-monto.es-ingreso { color: var(--acento-tinta); }
 
 /* ------------------------------------------------------------------- Tabs */
 
 .tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  /* Columnas automáticas: la barra se reparte sola entre las tabs que haya, sin
+     que el CSS tenga que saber cuántas son. */
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
   max-width: var(--ancho); margin: 0 auto;
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--fondo) 92%, transparent);
@@ -232,12 +600,65 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .tab {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 10px 4px 12px;
+  min-width: 0;
+  padding: 10px 2px 12px;
   background: transparent; border: 0;
-  color: var(--tenue-2); font-size: 11px; font-weight: 500;
+  color: var(--tenue-2); font-weight: 500;
   transition: color .15s;
 }
-.tab.es-activo { color: var(--acento-claro); }
+/* Con cinco tabs, "Inversiones" no entra en un teléfono angosto. */
+.tab span {
+  max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10.5px; letter-spacing: -.01em;
+}
+.tab.es-activo { color: var(--acento-tinta); }
+
+/* ---------------------------------------------------------------- Usuario */
+
+.perfil { display: flex; align-items: center; gap: 12px; }
+.perfil-avatar {
+  display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--acento-suave);
+  border: 1px solid var(--borde);
+  color: var(--acento-tinta); font-size: 18px; font-weight: 500;
+}
+.perfil-datos { display: flex; flex-direction: column; min-width: 0; }
+/* Un email largo corta donde haga falta antes que estirar la tarjeta. */
+.perfil-email { font-size: 15px; overflow-wrap: anywhere; }
+
+.ajuste {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.ajuste:last-child { border-bottom: 0; }
+.ajuste-texto { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+
+.interruptor {
+  position: relative; flex: none;
+  width: 44px; height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--borde-fuerte);
+  border-radius: 999px;
+  transition: border-color .15s;
+}
+.interruptor::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--tenue-2);
+  transition: transform .18s, background .18s;
+}
+.interruptor[aria-checked="true"] { border-color: var(--acento); }
+.interruptor[aria-checked="true"]::after {
+  transform: translateX(18px);
+  background: var(--acento-tinta);
+}
+.interruptor:disabled { opacity: .45; cursor: default; }
 
 /* ------------------------------------------------------------------ Login */
 
@@ -246,7 +667,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .login { display: grid; place-items: center; min-height: 100svh; padding: 24px 20px; }
 .login-caja { width: 100%; max-width: 340px; }
-.login-marca { font-weight: 600; color: var(--acento-claro); margin-bottom: 20px; }
+.login-marca { font-weight: 600; color: var(--acento-tinta); margin-bottom: 20px; }
 .login-titulo { font-size: 26px; letter-spacing: -.02em; }
 .login-apunte { margin: 6px 0 24px; }
 
@@ -255,7 +676,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .campo input {
   padding: 11px 13px;
   background: var(--superficie);
-  border: 1px solid var(--borde);
+  border: 1px solid var(--borde-campo);
   border-radius: var(--r-boton);
   color: var(--texto); font: inherit;
 }

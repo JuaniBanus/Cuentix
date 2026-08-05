@@ -45,6 +45,16 @@ Escribime en lenguaje natural y yo me doy cuenta de qué se trata.
 
 Si dudás entre ahorro e inversión: si puede perder valor, es inversión.
 
+🎯 OBJETIVOS DE AHORRO
+Si me decís para qué apartás la plata, la imputo al objetivo y te digo cómo
+venís: «guardé 150 mil para el viaje a Europa».
+Si no tengo uno que coincida, te pregunto antes de crearlo. Nunca lo adivino.
+
+🏦 DÓNDE GUARDÁS LA PLATA
+Si me decís dónde queda, lo anoto: «guardé 50 mil en el banco»,
+«aparté efectivo», «lo puse en Mercado Pago». Si no lo aclarás, no pasa
+nada: lo dejo en blanco y no invento.
+
 📊 PREGUNTARME
 • Totales — «¿cuánto gasté este mes?» · «¿cuánto llevo ahorrado en dólares?»
 • Por rubro — «¿en qué se me va la plata?» · «¿cuánto gasté en supermercado?»

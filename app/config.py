@@ -34,6 +34,11 @@ def _requerida(nombre: str) -> str:
     return valor
 
 
+def _opcional(nombre: str) -> str | None:
+    """Devuelve la variable `nombre`, o None si no está. No corta nada."""
+    return (os.getenv(nombre) or "").strip() or None
+
+
 def _requerida_chat_ids(nombre: str) -> frozenset[int]:
     """Lee una lista de chat_id separados por coma y la devuelve como enteros.
 
@@ -77,3 +82,16 @@ SUPABASE_KEY: str = _requerida("SUPABASE_KEY")
 # se mezclarían con los propios en la misma tabla. Para sumar a alguien, se
 # agrega su chat_id separado por coma.
 CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
+
+# UUID del usuario de Supabase dueño de los objetivos de ahorro.
+#
+# Hace falta porque `objetivos.user_id` es NOT NULL con DEFAULT auth.uid(), y
+# auth.uid() es null cuando se escribe con la clave service_role: el bot no
+# viaja con la sesión de nadie. Sin este valor puede leer objetivos e imputar
+# ahorros, pero no crear objetivos nuevos.
+#
+# Se saca del panel de Supabase: Authentication -> Users -> tu usuario -> UID.
+#
+# Es opcional a propósito: si falta, el bot funciona como siempre y solo avisa
+# que los objetivos se crean desde la web.
+SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")

@@ -1,0 +1,21 @@
+{
+  "name": "Cuentix",
+  "short_name": "Cuentix",
+  "description": "Tus cuentas del mes, en orden.",
+  "lang": "es-AR",
+  "dir": "ltr",
+
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+
+  "background_color": "#161826",
+  "theme_color": "#161826",
+
+  "icons": [
+    { "src": "icons/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icono-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

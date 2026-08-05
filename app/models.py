@@ -51,6 +51,15 @@ class Movimiento(BaseModel):
     # descarta. El tope de 60 es el mismo que el de categoria, porque ahora
     # son dos etiquetas del mismo orden y no un texto libre.
     descripcion: str = Field(min_length=1, max_length=60)
+    # Dónde está la plata: "efectivo", "banco", "billetera virtual".
+    #
+    # None significa que el usuario no lo dijo, y es un valor legítimo: la
+    # mayoría de los mensajes no lo mencionan. El parser nunca lo deduce, así
+    # que un null acá quiere decir "no se sabe" y no "no tiene".
+    #
+    # Es distinto de `categoria`: en "puse 100 lucas en un plazo fijo del
+    # banco", la categoría es "plazo fijo" y la cuenta es "banco".
+    cuenta: str | None = Field(default=None, min_length=1, max_length=40)
 
 
 class Consulta(BaseModel):

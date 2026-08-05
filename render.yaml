@@ -37,3 +37,7 @@ services:
         sync: false
       - key: CHATS_PERMITIDOS
         sync: false
+      # No es secreta —es el UUID de un usuario—, pero va por el panel igual:
+      # así el repo no queda atado a una cuenta concreta.
+      - key: SUPABASE_USER_ID
+        sync: false
