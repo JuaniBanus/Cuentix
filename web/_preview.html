@@ -29,6 +29,34 @@ import { renderGastos } from "./js/screens/gastos.js";
 import { renderAhorros } from "./js/screens/ahorros.js";
 import { renderInversiones } from "./js/screens/inversiones.js";
 import { mes } from "./js/periodo.js";
+import { fijarCotizacion } from "./js/format.js";
+
+// En la app las fija app.js con lo que devuelve cotizaciones.js. Sin esto, la
+// distribución no se dibuja: sin una moneda común, un reparto porcentual entre
+// pesos y dólares no significaría nada.
+fijarCotizacion({
+  venta: 1520,
+  fecha: "2026-08-05T15:00:00.000Z",
+  vencida: false,
+  tasas: { USD: 1, ARS: 1 / 1520, EUR: 1.1554 },
+  eurAproximado: false,
+});
+
+// Tenencias de ejemplo. Cubren los tres casos que la pantalla distingue:
+// cripto con precio de mercado (una en ganancia y otra en pérdida), activos sin
+// precio todavía, y dos monedas para que haya distribución por moneda.
+const inversiones = [
+  {id:"a", tipo:"cripto", ticker:"BTC",  nombre:"Bitcoin",       cantidad:0.5,  precio_compra:60000, moneda:"USD", fecha_compra:"2026-03-12", sector:null},
+  {id:"b", tipo:"cripto", ticker:"ETH",  nombre:"Ethereum",      cantidad:4,    precio_compra:3200,  moneda:"USD", fecha_compra:"2026-05-02", sector:null},
+  {id:"c", tipo:"cedear", ticker:"AAPL", nombre:"Apple",         cantidad:10,   precio_compra:25,    moneda:"USD", fecha_compra:"2026-08-06", sector:"tecnología"},
+  {id:"d", tipo:"accion", ticker:"TSLA", nombre:"Tesla",         cantidad:3,    precio_compra:250,   moneda:"USD", fecha_compra:"2026-03-12", sector:null},
+  {id:"e", tipo:"bono",   ticker:"AL30", nombre:"AL30",          cantidad:100,  precio_compra:1200,  moneda:"ARS", fecha_compra:"2026-07-01", sector:null},
+  {id:"f", tipo:"fci",    ticker:null,   nombre:"FCI Pellegrini", cantidad:1,   precio_compra:80000, moneda:"ARS", fecha_compra:"2026-06-15", sector:null},
+];
+
+// Lo que devolvería CoinGecko. Fijos y no en vivo para que el preview se vea
+// igual siempre: BTC arriba de la compra, ETH abajo, para ver los dos colores.
+const precios = { BTC: 71500, ETH: 2740 };
 const movimientos = [
   {id:9, fecha:"2026-08-04", tipo:"gasto",   monto:8500,   moneda:"ARS", categoria:"comida",        descripcion:"pancho y coca"},
   {id:8, fecha:"2026-08-04", tipo:"gasto",   monto:45000,  moneda:"ARS", categoria:"servicios",     descripcion:"luz"},
@@ -80,6 +108,11 @@ function pintar() {
     periodo: mes(2026, 7),
     moneda: "ARS",
     monedas: ["ARS", "USD"],
+    inversiones,
+    errorInversiones: null,
+    precios,
+    errorPrecios: null,
+    sinCotizar: [],
     categoriaAbierta,
     email: "vos@ejemplo.com",
     setMoneda: () => {},

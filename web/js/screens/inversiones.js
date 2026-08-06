@@ -141,7 +141,7 @@ export function renderInversiones(contenedor, ctx) {
 
   // null = todavía no llegó la consulta. [] = llegó y no hay tenencias. Sin la
   // distinción, la primera pintada diría "no cargaste nada" antes de saberlo.
-  if (inversiones === null) {
+  if (!inversiones) {
     contenedor.innerHTML = `<p class="vacio">Cargando tus inversiones…</p>`;
     return;
   }
