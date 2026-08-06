@@ -39,6 +39,8 @@ class Intencion(str, Enum):
 
     REGISTRAR = "registrar"
     REGISTRAR_INVERSION = "registrar_inversion"
+    CREAR_ALERTA = "crear_alerta"
+    VER_ALERTAS = "ver_alertas"
     TOTAL_POR_TIPO = "total_por_tipo"
     TOTAL_POR_CATEGORIA = "total_por_categoria"
     BALANCE = "balance"
@@ -96,6 +98,34 @@ class Inversion(BaseModel):
     moneda: Moneda = Moneda.USD
     fecha_compra: date
     sector: str | None = Field(default=None, max_length=60)
+
+
+class TipoAlerta(str, Enum):
+    """Qué tiene que pasar para que la alerta suene.
+
+    baja/sube miden un porcentaje contra el precio que había cuando se creó;
+    debajo/encima comparan contra un precio fijo. Son cuatro casos y no dos con
+    signo: "baja 5%" y "sube -5%" serían la misma cosa escrita de dos formas.
+    """
+
+    BAJA = "baja"
+    SUBE = "sube"
+    DEBAJO = "debajo"
+    ENCIMA = "encima"
+
+
+class Alerta(BaseModel):
+    """Un umbral de precio que el usuario quiere que le avisen."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    ticker: str = Field(min_length=1, max_length=20)
+    # "us" (NASDAQ/NYSE) o "ar" (BYMA). Sin esto, una alerta sobre AAPL podría
+    # vigilar el CEDEAR cuando se quiso la acción, o al revés.
+    mercado: str = Field(default="us", pattern="^(us|ar)$")
+    tipo: TipoAlerta
+    # Porcentaje o precio según el tipo, siempre positivo.
+    umbral: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
 
 
 class Consulta(BaseModel):

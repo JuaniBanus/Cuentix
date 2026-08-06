@@ -1,0 +1,71 @@
+# Revisa las alertas de precio cada media hora en horario de mercado.
+#
+# ¿Por qué acá y no en el propio bot?
+#
+# El servicio de Render duerme tras ~15 minutos sin tráfico. Un scheduler
+# adentro del proceso (asyncio, APScheduler) se congela junto con él y las
+# alertas dejarían de revisarse justo cuando nadie está usando la app, que es
+# cuando más falta hacen. Hace falta un disparo desde AFUERA.
+#
+# GitHub Actions y no un servicio de cron externo porque el repo ya vive acá:
+# no hay otra cuenta que crear, el schedule queda versionado junto al código y
+# el secreto va en los Secrets del repo. De paso, el request despierta a Render.
+#
+# Aviso sobre la puntualidad: el cron de GitHub Actions NO es exacto. En
+# momentos de carga los disparos se retrasan, y a veces bastante. Para alertas
+# de precio de finanzas personales alcanza; si hiciera falta precisión de
+# minutos, esto no sirve y habría que pagar un scheduler.
+
+name: Alertas de precio
+
+on:
+  schedule:
+    # Cada 30 minutos, de lunes a viernes, entre las 13:00 y las 21:00 UTC.
+    # Eso cubre la rueda de Nueva York (9:30 a 16:00 hora del este) y la de
+    # BYMA. Fuera de ese horario los precios no se mueven y revisarlos sería
+    # gastar cuota del proveedor para llegar siempre a la misma conclusión.
+    - cron: "*/30 13-21 * * 1-5"
+  # Para poder probarlo a mano desde la pestaña Actions sin esperar al reloj.
+  workflow_dispatch:
+
+# Si una corrida se solapa con la anterior —porque Render tardó en despertar—,
+# se descarta la nueva en vez de acumular pedidos encima.
+concurrency:
+  group: alertas
+  cancel-in-progress: false
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar la revisión
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          ALERTAS_SECRET: ${{ secrets.ALERTAS_SECRET }}
+        run: |
+          if [ -z "$BACKEND_URL" ] || [ -z "$ALERTAS_SECRET" ]; then
+            echo "Faltan los secrets BACKEND_URL o ALERTAS_SECRET del repositorio."
+            exit 1
+          fi
+
+          # --max-time generoso: si el servicio estaba dormido, el primer
+          # request paga el arranque completo, que puede pasar el minuto.
+          #
+          # El secreto va en la URL, así que -s y --output evitan que aparezca
+          # en el log de la corrida, que es público en un repo público.
+          codigo=$(curl -s -X POST \
+            --max-time 180 \
+            --retry 2 --retry-delay 30 --retry-connrefused \
+            -o respuesta.json -w "%{http_code}" \
+            "$BACKEND_URL/tareas/alertas/$ALERTAS_SECRET")
+
+          echo "HTTP $codigo"
+          cat respuesta.json
+          echo
+
+          # 404 es el secreto equivocado: el endpoint no confirma que exista.
+          if [ "$codigo" = "404" ]; then
+            echo "El secreto no coincide con ALERTAS_SECRET del servidor."
+            exit 1
+          fi
+          [ "$codigo" = "200" ] || exit 1

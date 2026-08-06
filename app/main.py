@@ -14,7 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from app import pendientes
 from app.comandos import respuesta_directa
-from app.config import CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
+from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
+from app.alertas import revisar as revisar_alertas_de_precio
 from app.insights import AgregadosGastos, InsightsError
 from app.insights import generar as generar_insights
 from app.mercado import MercadoError, SinClave, ValorInvalido
@@ -40,7 +41,16 @@ from app.db import (
     totales_por_categoria,
     totales_por_moneda,
 )
-from app.models import Consulta, Intencion, Inversion, Moneda, Movimiento, TipoInversion
+from app.models import (
+    Alerta,
+    Consulta,
+    Intencion,
+    Inversion,
+    Moneda,
+    Movimiento,
+    TipoAlerta,
+    TipoInversion,
+)
 from app.objetivos import buscar, parsear_monto, progreso
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
 from app.telegram import (
@@ -171,6 +181,26 @@ async def api_indice(symbol: str) -> dict:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except MercadoError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@app.post("/tareas/alertas/{secret}")
+async def revisar_alertas(secret: str) -> dict:
+    """Revisa las alertas de precio y avisa las que se cumplieron.
+
+    La dispara un cron externo, no una persona, así que va protegida por un
+    secreto en la URL y no por una sesión: no hay nadie logueado del otro lado.
+    Es el mismo criterio que el webhook de Telegram.
+
+    Se ejecuta en el request y no en un BackgroundTask a propósito: el cron
+    necesita saber si salió bien, y con 200-y-a-otra-cosa se enteraría siempre
+    de que sí.
+    """
+    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
+        # 404 y no 403, igual que el webhook: no confirmamos que la ruta exista.
+        logger.warning("Disparo de alertas con secreto inválido")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+    return await revisar_alertas_de_precio()
 
 
 @app.get("/api/cuota")
@@ -341,6 +371,12 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
     if intencion is Intencion.REGISTRAR_INVERSION:
         return await _resolver_inversion(interpretacion)
 
+    if intencion is Intencion.CREAR_ALERTA:
+        return await _resolver_alerta(interpretacion, chat_id)
+
+    if intencion is Intencion.VER_ALERTAS:
+        return await _texto_alertas(chat_id)
+
     if intencion is Intencion.DESCONOCIDA or interpretacion.consulta is None:
         return MSG_NO_ENTENDI
 
@@ -355,6 +391,106 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
         return await run_in_threadpool(_texto_balance, consulta)
 
     return MSG_NO_ENTENDI
+
+
+# --------------------------------------------------------------------------
+# Alertas de precio
+# --------------------------------------------------------------------------
+
+
+async def _resolver_alerta(interpretacion: Interpretacion, chat_id: int) -> str:
+    """Crea la alerta, o pregunta lo que falte."""
+    if interpretacion.faltantes or not interpretacion.alerta:
+        return _pedir_faltantes_alerta(interpretacion.faltantes)
+
+    alerta = interpretacion.alerta
+
+    # El precio de ahora es la referencia contra la que se miden después los
+    # porcentajes. Se consulta ANTES de guardar: sin referencia, un "baja 5%"
+    # no tendría contra qué compararse y la alerta no sonaría nunca.
+    referencia = None
+    moneda = None
+    try:
+        datos = await precio_de_mercado(alerta.ticker, alerta.mercado)
+        referencia = Decimal(str(datos["precio"]))
+        moneda = datos.get("moneda")
+    except MercadoError as exc:
+        if alerta.tipo in (TipoAlerta.BAJA, TipoAlerta.SUBE):
+            return (
+                f"No pude traer el precio de {alerta.ticker} para tomarlo de "
+                f"referencia, así que no puedo medir una variación desde hoy.\n\n"
+                f"{exc}\n\n"
+                f"Probá con un precio concreto: «avisame si {alerta.ticker} baja de 100»."
+            )
+        # Para debajo/encima el umbral es absoluto: la referencia es un lujo.
+        logger.info("Alerta sobre %s sin precio de referencia: %s", alerta.ticker, exc)
+
+    fila = await run_in_threadpool(
+        crear_alerta, alerta, chat_id=chat_id, referencia=referencia, moneda=moneda
+    )
+    logger.info("Alerta %s creada para %s", fila.get("id"), alerta.ticker)
+    return _confirmacion_alerta(alerta, referencia, moneda)
+
+
+def _pedir_faltantes_alerta(faltantes: tuple[str, ...]) -> str:
+    etiquetas = {
+        "ticker": "qué activo querés vigilar",
+        "umbral": "de cuánto es el umbral",
+        "tipo": "si querés que te avise cuando suba o cuando baje",
+    }
+    pedidos = [etiquetas.get(f, f) for f in faltantes] or ["algún dato"]
+    detalle = pedidos[0] if len(pedidos) == 1 else ", ".join(pedidos[:-1]) + f" y {pedidos[-1]}"
+
+    return (
+        f"Me falta saber {detalle}.\n\n"
+        "Probá algo como:\n"
+        "«avisame si AAPL baja 5%»\n"
+        "«avisame si TSLA supera los 300 dólares»"
+    )
+
+
+def _confirmacion_alerta(alerta: Alerta, referencia: Decimal | None, moneda: str | None) -> str:
+    donde = "en BYMA" if alerta.mercado == "ar" else ""
+    umbral = _formatear_cantidad(alerta.umbral)
+
+    if alerta.tipo in (TipoAlerta.BAJA, TipoAlerta.SUBE):
+        # Indicativo y no subjuntivo: "si baja", no "si baje".
+        verbo = "baja" if alerta.tipo is TipoAlerta.BAJA else "sube"
+        # Se dice desde qué precio: "baja 5%" sin decir 5% de qué es ambiguo, y
+        # es justo lo que la alerta va a medir.
+        desde = f" desde {_formatear_monto(referencia, Moneda(moneda))}" if referencia and moneda else ""
+        return (
+            f"🔔 Listo. Te aviso si {alerta.ticker} {donde} {verbo} {umbral}%{desde}.\n\n"
+            "Cuando suene se apaga sola, para no repetirse."
+        ).replace("  ", " ")
+
+    direccion = "baja de" if alerta.tipo is TipoAlerta.DEBAJO else "supera"
+    precio = _formatear_monto(alerta.umbral, Moneda(moneda)) if moneda else umbral
+    return (
+        f"🔔 Listo. Te aviso si {alerta.ticker} {donde} {direccion} {precio}.\n\n"
+        "Cuando suene se apaga sola, para no repetirse."
+    ).replace("  ", " ")
+
+
+async def _texto_alertas(chat_id: int) -> str:
+    """Las alertas activas de este chat."""
+    filas = await run_in_threadpool(alertas_de_chat, chat_id)
+    if not filas:
+        return (
+            "No tenés alertas activas.\n\n"
+            "Podés pedirme una así: «avisame si AAPL baja 5%»."
+        )
+
+    lineas = ["🔔 Tus alertas activas:", ""]
+    for f in filas:
+        umbral = _formatear_cantidad(Decimal(str(f["umbral"])))
+        if f["tipo"] in ("baja", "sube"):
+            que = f"{'baja' if f['tipo'] == 'baja' else 'sube'} {umbral}%"
+        else:
+            que = f"{'baja de' if f['tipo'] == 'debajo' else 'supera'} {umbral}"
+        lineas.append(f"• {f['ticker']} — si {que}")
+
+    return "\n".join(lineas)
 
 
 async def _resolver_inversion(interpretacion: Interpretacion) -> str:

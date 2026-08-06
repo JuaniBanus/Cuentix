@@ -100,6 +100,17 @@ CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
 # compras de inversión), con un mensaje que explica qué configurar.
 SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")
 
+# Secreto que protege el disparador de las alertas de precio.
+#
+# Va en la URL (/tareas/alertas/<secreto>), igual que el del webhook: quien lo
+# llama es un cron, no una persona logueada, así que no hay sesión que validar.
+# Sin él, cualquiera podría hacer correr la revisión todo el tiempo y gastarnos
+# la cuota del proveedor de precios.
+#
+# Generalo con: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Vacío = el endpoint responde 404 y las alertas no se revisan solas.
+ALERTAS_SECRET: str | None = _opcional("ALERTAS_SECRET")
+
 # Clave de Twelve Data, para el proxy de precios de mercado.
 #
 # Va acá y NUNCA en web/js/: el navegador muestra todo lo que carga, así que
