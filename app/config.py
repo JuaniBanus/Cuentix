@@ -99,3 +99,19 @@ CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
 # y solo se rechazan las operaciones que crean filas nuevas (objetivos nuevos y
 # compras de inversión), con un mensaje que explica qué configurar.
 SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")
+
+# Desde qué orígenes puede llamar la web al endpoint de insights.
+#
+# Hace falta porque el front y el bot NO comparten origen: la web es estática y
+# vive en el hosting compartido, el bot está en Render. Sin CORS el navegador
+# bloquea la llamada antes de que salga.
+#
+# Es una lista blanca separada por coma, no "*": el endpoint gasta cuota de
+# Gemini, así que no conviene que cualquier página de internet pueda invocarlo
+# desde el navegador de un usuario logueado.
+# Ejemplo: ORIGENES_WEB=https://cuentix.com.ar,http://127.0.0.1:8777
+ORIGENES_WEB: tuple[str, ...] = tuple(
+    origen.strip().rstrip("/")
+    for origen in (_opcional("ORIGENES_WEB") or "").split(",")
+    if origen.strip()
+)

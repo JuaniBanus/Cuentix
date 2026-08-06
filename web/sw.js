@@ -18,7 +18,7 @@
 //
 // Subir VERSION borra el caché viejo. Hay que tocarla solo si cambia esta lista.
 
-const VERSION = "cuentix-v7";
+const VERSION = "cuentix-v8";
 
 const ESENCIALES = [
   "./",
@@ -36,6 +36,7 @@ const ESENCIALES = [
   "./js/estado.js",
   "./js/format.js",
   "./js/gastosCuentas.js",
+  "./js/insights.js",
   "./js/linea.js",
   "./js/objetivos.js",
   "./js/periodo.js",

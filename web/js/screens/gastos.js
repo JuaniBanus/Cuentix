@@ -7,7 +7,7 @@
 
 import { porMoneda } from "../cuentas.js";
 import { renderDona } from "../donut.js";
-import { esc, monto } from "../format.js";
+import { enmascararMontos, esc, monto, montosOcultos } from "../format.js";
 import { resumenDeGastos } from "../gastosCuentas.js";
 import { renderLinea } from "../linea.js";
 import { anterior } from "../periodo.js";
@@ -113,6 +113,91 @@ function vistaDetalle(contenedor, { gastos, categoria, categorias, moneda, perio
   contenedor.querySelector(".boton-volver").addEventListener("click", () => setCategoria(null));
 }
 
+// --------------------------------------------------------------------------
+// Panel de Insights
+// --------------------------------------------------------------------------
+//
+// El análisis no se dispara solo al entrar a Gastos: lo pide la persona con el
+// botón. Son dos razones distintas y las dos pesan. Una, cada análisis es una
+// llamada a Gemini y no tiene sentido pagarla cada vez que alguien mira sus
+// gastos de paso. La otra, el backend duerme cuando no tiene tráfico y puede
+// tardar en despertar; una espera larga que empieza sin que nadie la pida se
+// siente como que la app se colgó.
+
+const ICONO_INSIGHT = {
+  ahorro: "💡",
+  crecimiento: "📈",
+  suscripcion: "🔁",
+  consejo: "🧭",
+};
+
+// Va SIEMPRE que se muestren insights, no escondido detrás de un "ver más":
+// son observaciones generadas por un modelo sobre los propios números, no una
+// recomendación profesional, y eso tiene que estar a la vista de quien lee.
+const DISCLAIMER = `
+  <p class="insights-aviso">
+    Orientativo: son observaciones automáticas sobre tus propios números,
+    generadas con IA. No son asesoramiento financiero ni recomendaciones de
+    inversión, y pueden tener errores. Revisalas antes de tomar decisiones.
+  </p>`;
+
+function tarjetaInsight(insight) {
+  const icono = ICONO_INSIGHT[insight.tipo] ?? "•";
+  // El texto lo escribe un modelo y trae las cifras adentro, así que el ojo
+  // tiene que taparlas acá: no pasaron por monto() como el resto de la app.
+  const tapar = (t) => esc(montosOcultos() ? enmascararMontos(t) : t);
+  return `
+    <li class="insight">
+      <span class="insight-icono" aria-hidden="true">${icono}</span>
+      <span class="insight-texto">
+        <span class="insight-titulo">${tapar(insight.titulo)}</span>
+        <span class="insight-detalle">${tapar(insight.detalle)}</span>
+        ${insight.referencia ? `<span class="insight-ref">${esc(insight.referencia)}</span>` : ""}
+      </span>
+    </li>`;
+}
+
+function panelInsights(ctx) {
+  const { insights, insightsCargando, errorInsights, insightsPedidos } = ctx;
+
+  let cuerpo;
+
+  if (insightsCargando) {
+    cuerpo = `
+      <p class="insights-cargando" role="status">
+        Analizando tus gastos…
+        <span class="apunte-tenue">Puede tardar hasta un minuto si el servidor estaba dormido.</span>
+      </p>`;
+  } else if (errorInsights) {
+    cuerpo = `
+      <p class="insights-error" role="alert">${esc(errorInsights)}</p>
+      <button class="boton" data-insights>Reintentar</button>`;
+  } else if (insights?.length) {
+    cuerpo = `<ul class="insights">${insights.map(tarjetaInsight).join("")}</ul>
+      ${DISCLAIMER}
+      <button class="boton boton-tenue" data-insights>Volver a analizar</button>`;
+  } else if (insightsPedidos) {
+    // Pedido, respondido y sin nada que decir. Es un resultado válido: con
+    // pocos datos, inventar cinco observaciones sería peor que no dar ninguna.
+    cuerpo = `
+      <p class="vacio">No encontré nada que valga la pena señalar todavía.
+      Con unos meses más de movimientos el análisis tiene más con qué trabajar.</p>
+      ${DISCLAIMER}
+      <button class="boton boton-tenue" data-insights>Volver a analizar</button>`;
+  } else {
+    cuerpo = `
+      <p class="apunte">Miro tus últimos meses y te digo dónde se puede
+      ahorrar, qué categoría creció y si hay cargos que se repiten.</p>
+      <button class="boton boton-acento" data-insights>Analizar mis gastos</button>`;
+  }
+
+  return `
+    <section class="tarjeta" aria-labelledby="titulo-insights">
+      <h2 id="titulo-insights" class="tarjeta-titulo">Insights</h2>
+      ${cuerpo}
+    </section>`;
+}
+
 function vistaDesglose(contenedor, ctx, resumen) {
   const { moneda, monedas, periodo, setMoneda, setCategoria } = ctx;
 
@@ -143,7 +228,9 @@ function vistaDesglose(contenedor, ctx, resumen) {
       ${resumen.categorias.length
         ? barrasTocables(resumen.categorias, moneda)
         : `<p class="vacio">No hay gastos en este período.</p>`}
-    </section>`;
+    </section>
+
+    ${resumen.categorias.length ? panelInsights(ctx) : ""}`;
 
   renderLinea(contenedor.querySelector("#grafico-linea"), resumen.serie, { moneda, periodo });
 
@@ -165,6 +252,10 @@ function vistaDesglose(contenedor, ctx, resumen) {
 
   for (const boton of contenedor.querySelectorAll("[data-categoria]")) {
     boton.addEventListener("click", () => setCategoria(boton.dataset.categoria));
+  }
+
+  for (const boton of contenedor.querySelectorAll("[data-insights]")) {
+    boton.addEventListener("click", () => ctx.analizarGastos?.());
   }
 }
 

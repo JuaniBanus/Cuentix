@@ -45,6 +45,13 @@ export const estado = {
   errorPrecios: null,
   // Tickers que CoinGecko no supo cotizar, para poder aclararlo.
   sinCotizar: [],
+  // Panel de Insights de Gastos. El análisis se pide a mano, así que hace
+  // falta recordar si ya se pidió: sin `insightsPedidos` no se distingue
+  // "todavía no lo pediste" de "lo pedí y no había nada para decir".
+  insights: [],
+  insightsCargando: false,
+  insightsPedidos: false,
+  errorInsights: null,
   // Categoría abierta en Gastos. Vive acá y no adentro de la pantalla porque
   // cada toque del ojo la redibuja entera, y una variable local se perdería.
   categoriaAbierta: null,
@@ -69,6 +76,10 @@ export function reiniciarEstado() {
   estado.precios = {};
   estado.errorPrecios = null;
   estado.sinCotizar = [];
+  estado.insights = [];
+  estado.insightsCargando = false;
+  estado.insightsPedidos = false;
+  estado.errorInsights = null;
   estado.categoriaAbierta = null;
   estado.objetivos = [];
   estado.vistaObjetivo = null;

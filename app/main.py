@@ -6,14 +6,20 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, status
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from app import pendientes
 from app.comandos import respuesta_directa
-from app.config import CHATS_PERMITIDOS, WEBHOOK_SECRET
+from app.config import CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
+from app.insights import AgregadosGastos, InsightsError
+from app.insights import generar as generar_insights
+from app.sesion_web import SesionInvalida
+from app.sesion_web import cerrar_cliente as cerrar_cliente_sesion
+from app.sesion_web import verificar as verificar_sesion
 from app.db import (
     DBError,
     Total,
@@ -68,16 +74,62 @@ async def lifespan(app: FastAPI):
     logger.info("Base de datos lista")
     yield
     await cerrar_cliente()  # cierra el AsyncClient de httpx
-    logger.info("Cliente de Telegram cerrado")
+    await cerrar_cliente_sesion()  # el que valida las sesiones de la web
+    logger.info("Clientes HTTP cerrados")
 
 
 app = FastAPI(title="Agente Cuenta", lifespan=lifespan)
+
+# La web y el bot no comparten origen (la web es estática, el bot está en
+# Render), así que sin esto el navegador bloquea el pedido de insights.
+# La lista es blanca y explícita: el endpoint gasta cuota de Gemini y no
+# conviene que lo pueda invocar cualquier página.
+if ORIGENES_WEB:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(ORIGENES_WEB),
+        allow_methods=["POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+else:
+    logger.warning(
+        "ORIGENES_WEB está vacío: el panel de insights de la web no va a poder "
+        "llamar al backend. Definí los orígenes permitidos en el .env."
+    )
 
 
 @app.get("/")
 async def salud() -> dict[str, str]:
     """Chequeo de vida, para monitoreo o para ver que levantó bien."""
     return {"status": "ok"}
+
+
+@app.post("/insights")
+async def analizar_gastos(
+    datos: AgregadosGastos,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, list]:
+    """Interpreta agregados de gasto y devuelve observaciones.
+
+    Recibe números ya calculados por la web, no movimientos: acá no se lee la
+    base ni se sabe de quién son. La autorización sobre los datos ya la hizo
+    RLS en el navegador; el token solo prueba que quien llama es un usuario y
+    no cualquiera gastando nuestra cuota de Gemini.
+
+    Se resuelve en el request y no en un BackgroundTask —al revés que el
+    webhook— porque acá hay alguien esperando la respuesta en pantalla.
+    """
+    try:
+        await verificar_sesion(authorization)
+    except SesionInvalida as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    try:
+        insights = await run_in_threadpool(generar_insights, datos)
+    except InsightsError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return {"insights": [i.model_dump() for i in insights]}
 
 
 @app.post("/webhook/{secret}")
