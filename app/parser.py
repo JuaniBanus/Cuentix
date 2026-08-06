@@ -23,11 +23,13 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import GEMINI_API_KEY
 from app.models import (
+    Alerta,
     Consulta,
     Intencion,
     Inversion,
     Moneda,
     Movimiento,
+    TipoAlerta,
     TipoInversion,
     TipoMovimiento,
 )
@@ -97,11 +99,19 @@ class _InversionExtraida(BaseModel):
     sector: str | None = None
 
 
+class _AlertaExtraida(BaseModel):
+    ticker: str | None = None
+    mercado: str | None = None
+    tipo: TipoAlerta | None = None
+    umbral: float | None = None
+
+
 class _InterpretacionExtraida(BaseModel):
     intencion: Intencion
     movimiento: _MovimientoExtraido | None = None
     consulta: _ConsultaExtraida | None = None
     inversion: _InversionExtraida | None = None
+    alerta: _AlertaExtraida | None = None
 
 
 class Interpretacion(NamedTuple):
@@ -111,6 +121,7 @@ class Interpretacion(NamedTuple):
     movimiento: Movimiento | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
+    alerta: Alerta | None = None
     # A qué objetivo dijo el usuario que va el ahorro, con sus palabras. Viaja
     # aparte del Movimiento porque no es un dato de la tabla: es la pista para
     # buscar el objetivo, y puede no encontrar ninguno.
@@ -284,6 +295,31 @@ cotización que creas saber ni una cantidad con un 1 por defecto: el sistema
 se encarga de preguntar lo que falte.
 Ejemplo: "compré bitcoin" -> tipo=cripto, ticker=BTC, nombre=Bitcoin,
 cantidad=null, precio_compra=null.
+
+======================= SI PIDE UNA ALERTA DE PRECIO =====================
+Poné intencion="crear_alerta" y completá "alerta". El resto en null.
+  "avisame si AAPL baja 5%"
+  "tocame si el bitcoin sube 10%"
+  "avisame cuando TSLA esté por debajo de 200 dólares"
+  "alerta si GGAL supera los 8000 pesos"
+
+CAMPOS
+- ticker: el símbolo en MAYÚSCULAS. Mismas equivalencias que en las compras
+  (Apple->AAPL, bitcoin->BTC).
+- tipo: "baja" o "sube" cuando el mensaje habla de un PORCENTAJE de variación.
+  "debajo" o "encima" cuando habla de un PRECIO concreto que se cruza.
+    "baja 5%" -> tipo=baja, umbral=5
+    "supera los 8000 pesos" -> tipo=encima, umbral=8000
+- umbral: siempre POSITIVO. La dirección la da el tipo, nunca el signo.
+  "baja 5%" -> 5, jamás -5.
+- mercado: "ar" si el mensaje menciona pesos, el Merval, BYMA o un papel
+  argentino (GGAL, YPFD, AL30). "us" en cualquier otro caso, que es el default.
+
+Si el mensaje no dice el umbral ("avisame si AAPL baja"), igual poné
+intencion="crear_alerta" con umbral=null: el sistema pregunta.
+
+Si pide VER las alertas que tiene ("qué alertas tengo", "mostrame mis
+alertas"), poné intencion="ver_alertas" y dejá todo lo demás en null.
 
 =========================== SI ES UNA CONSULTA ==========================
 Elegí la intención que corresponda, completá "consulta" y dejá
@@ -467,6 +503,38 @@ def _a_inversion(
     return inversion, ()
 
 
+def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[str, ...]]:
+    """Arma la Alerta, o devuelve qué falta para poder armarla."""
+    if extraida is None:
+        return None, ("ticker", "umbral")
+
+    faltantes = []
+    ticker = (extraida.ticker or "").strip().upper().replace(" ", "")
+    if not ticker:
+        faltantes.append("ticker")
+    # El umbral en 0 o negativo no es un umbral: el modelo pudo haber mandado
+    # el signo de la dirección, que acá lo aporta el tipo.
+    if extraida.umbral is None or extraida.umbral <= 0:
+        faltantes.append("umbral")
+    if extraida.tipo is None:
+        faltantes.append("tipo")
+
+    if faltantes:
+        return None, tuple(faltantes)
+
+    try:
+        alerta = Alerta(
+            ticker=ticker[:20],
+            mercado=(extraida.mercado or "us").strip().lower(),
+            tipo=extraida.tipo,
+            umbral=_decimal_limpio(extraida.umbral),
+        )
+    except (ValidationError, InvalidOperation, ValueError) as exc:
+        raise ParserError(f"Gemini devolvió una alerta inválida: {exc}") from exc
+
+    return alerta, ()
+
+
 def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     """Normaliza los filtros de la consulta. Sin filtros = todo el historial."""
     if extraida is None:
@@ -563,6 +631,15 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             inversion=inversion,
             faltantes=faltantes,
         )
+
+    if extraida.intencion is Intencion.CREAR_ALERTA:
+        alerta, faltantes = _a_alerta(extraida.alerta)
+        return Interpretacion(
+            intencion=Intencion.CREAR_ALERTA, alerta=alerta, faltantes=faltantes
+        )
+
+    if extraida.intencion is Intencion.VER_ALERTAS:
+        return Interpretacion(intencion=Intencion.VER_ALERTAS)
 
     if extraida.intencion is Intencion.DESCONOCIDA:
         return Interpretacion(intencion=Intencion.DESCONOCIDA)

@@ -18,7 +18,7 @@ Dos cosas heredadas del diseño anterior que conviene conocer:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -26,13 +26,14 @@ from postgrest import APIError
 from supabase import Client, create_client
 
 from app.config import SUPABASE_KEY, SUPABASE_URL, SUPABASE_USER_ID
-from app.models import Inversion, Moneda, Movimiento, TipoMovimiento
+from app.models import Alerta, Inversion, Moneda, Movimiento, TipoMovimiento
 
 logger = logging.getLogger(__name__)
 
 TABLA = "movimientos"
 TABLA_OBJETIVOS = "objetivos"
 TABLA_INVERSIONES = "inversiones"
+TABLA_ALERTAS = "alertas"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -371,6 +372,144 @@ def guardar_inversion(inversion: Inversion) -> str:
     if not respuesta.data:
         raise DBError("El insert de inversión no devolvió la fila creada.")
     return str(respuesta.data[0]["id"])
+
+
+# --------------------------------------------------------------------------
+# Alertas de precio
+# --------------------------------------------------------------------------
+
+
+def crear_alerta(
+    alerta: Alerta,
+    *,
+    chat_id: int,
+    referencia: Decimal | None,
+    moneda: str | None,
+) -> dict:
+    """Guarda una alerta y devuelve la fila.
+
+    `referencia` es el precio del momento: contra él se miden después los
+    porcentajes. Se guarda al crear y no se recalcula, para que "baja 5%"
+    signifique siempre 5% desde que la pediste.
+    """
+    if not SUPABASE_USER_ID:
+        raise DBError(
+            "Falta SUPABASE_USER_ID en la configuración: sin ese dato no se "
+            "puede saber de quién es la alerta."
+        )
+
+    fila = {
+        "user_id": SUPABASE_USER_ID,
+        "chat_id": chat_id,
+        "ticker": alerta.ticker,
+        "mercado": alerta.mercado,
+        "tipo": alerta.tipo.value,
+        "umbral": str(alerta.umbral),
+        "referencia": str(referencia) if referencia is not None else None,
+        "moneda": moneda,
+    }
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_ALERTAS).insert(fila).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la alerta: %s", detalle)
+        raise DBError(f"No pude crear la alerta: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red creando la alerta")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El insert de la alerta no devolvió la fila creada.")
+    return respuesta.data[0]
+
+
+def alertas_activas() -> list[dict]:
+    """Todas las alertas encendidas, de todos los usuarios.
+
+    Sin filtrar por usuario a propósito: la corrida del cron no la pide nadie
+    en particular, revisa las de todos. Por eso el endpoint que la dispara va
+    protegido por un secreto y no por una sesión.
+    """
+    try:
+        return (
+            _obtener_cliente()
+            .table(TABLA_ALERTAS)
+            .select("*")
+            .eq("activa", True)
+            .execute()
+            .data
+            or []
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"Error consultando las alertas: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando alertas")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def alertas_de_chat(chat_id: int) -> list[dict]:
+    """Las alertas activas de un chat, para poder listarlas por Telegram."""
+    try:
+        return (
+            _obtener_cliente()
+            .table(TABLA_ALERTAS)
+            .select("*")
+            .eq("chat_id", chat_id)
+            .eq("activa", True)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"Error consultando las alertas: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando alertas del chat")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def apagar_alerta(alerta_id: str, *, precio: Decimal | None = None) -> None:
+    """Marca una alerta como disparada.
+
+    Se apaga en vez de dejarla sonar de nuevo: un papel que quedó debajo del
+    umbral cumpliría la condición en cada corrida y mandaría un mensaje por
+    hora hasta que alguien lo note.
+    """
+    cambios: dict[str, Any] = {
+        "activa": False,
+        "disparada_en": datetime.now(timezone.utc).isoformat(),
+    }
+    if precio is not None:
+        cambios["precio_disparo"] = str(precio)
+
+    try:
+        _obtener_cliente().table(TABLA_ALERTAS).update(cambios).eq("id", alerta_id).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude apagar la alerta: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red apagando la alerta")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def borrar_alertas_de_chat(chat_id: int) -> int:
+    """Apaga todas las de un chat. Devuelve cuántas."""
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA_ALERTAS)
+            .update({"activa": False})
+            .eq("chat_id", chat_id)
+            .eq("activa", True)
+            .execute()
+        )
+        return len(respuesta.data or [])
+    except Exception as exc:
+        logger.exception("Error apagando las alertas del chat")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
 class Total:

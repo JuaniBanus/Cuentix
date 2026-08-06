@@ -48,3 +48,7 @@ services:
       # /api/precio exista en vez de que la web llame al proveedor directo.
       - key: TWELVE_DATA_API_KEY
         sync: false
+      # Protege /tareas/alertas/<secreto>, que dispara el cron de GitHub
+      # Actions. El mismo valor va en los Secrets del repo.
+      - key: ALERTAS_SECRET
+        sync: false
