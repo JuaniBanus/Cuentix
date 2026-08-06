@@ -103,6 +103,11 @@ export function pintar() {
     precios: estado.precios,
     errorPrecios: estado.errorPrecios,
     sinCotizar: estado.sinCotizar,
+    insights: estado.insights,
+    insightsCargando: estado.insightsCargando,
+    insightsPedidos: estado.insightsPedidos,
+    errorInsights: estado.errorInsights,
+    analizarGastos: acciones.analizarGastos,
     categoriaAbierta: estado.categoriaAbierta,
     email: estado.email,
     setMoneda: (m) => {

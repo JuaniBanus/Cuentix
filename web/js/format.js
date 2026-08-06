@@ -107,6 +107,26 @@ export function monto(valor, moneda = "ARS", { signo = false } = {}) {
   return `${prefijo}${simbolo}${enteros}`;
 }
 
+/**
+ * Tapa los montos escritos adentro de un texto libre.
+ *
+ * Hace falta para los insights: son frases que escribe un modelo y llevan las
+ * cifras adentro ("gastaste $40.000 en delivery"), así que no pasan por
+ * `monto()` como el resto de la app. Sin esto, tapar los montos con el ojo y
+ * mostrarle la pantalla a alguien filtraría los números por el panel.
+ *
+ * Enmascara lo que lleva símbolo de moneda o separador de miles, y los números
+ * seguidos de "pesos"/"dólares"/"euros". Deliberadamente NO toca enteros
+ * cortos ni años: "se repite hace 6 meses" y "desde 2026" no son montos, y
+ * romperlos dejaría el texto sin sentido a cambio de nada.
+ */
+export function enmascararMontos(texto) {
+  return String(texto ?? "")
+    .replace(/(?:US\$|U\$S|\$|€)\s?\d[\d.,]*/g, "••••••")
+    .replace(/\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b/g, "••••••")
+    .replace(/\b\d[\d.,]*\s?(pesos|d[óo]lares|euros)\b/gi, "•••••• $1");
+}
+
 /** "2026-08-04" -> "4 ago" · si es de otro año, "4 ago 2025". */
 export function fechaCorta(iso) {
   const [a, m, d] = iso.split("-").map(Number);

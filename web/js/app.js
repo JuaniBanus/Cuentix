@@ -14,6 +14,7 @@ import {
 } from "./data.js";
 import { resumenDeTasas, traerCotizaciones } from "./cotizaciones.js";
 import { estado, reiniciarEstado } from "./estado.js";
+import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
 import { anterior, mesActual } from "./periodo.js";
 import { traerPreciosCripto } from "./precios.js";
@@ -55,6 +56,7 @@ async function arrancar() {
       borrarObjetivo,
       alEntrarA: cargarLoDelTab,
       recargarInversiones: cargarInversiones,
+      analizarGastos,
     },
   });
   montarSelectorPeriodo({
@@ -204,6 +206,58 @@ async function borrarObjetivo(id) {
     estado.guardando = false;
     pintar();
   }
+}
+
+// --------------------------------------------------------------------------
+// Insights de gastos
+// --------------------------------------------------------------------------
+
+/**
+ * Analiza los gastos y trae las recomendaciones.
+ *
+ * Los agregados se calculan acá, en el navegador, y al backend viajan solo
+ * números: totales por categoría, variaciones y cargos repetidos. Los
+ * movimientos no salen de esta máquina.
+ *
+ * Usa una ventana más larga que la pantalla —varios meses, no el período
+ * elegido— porque con dos meses no se distingue una suscripción de una
+ * casualidad. Esa consulta se hace recién acá y no en cada carga.
+ */
+async function analizarGastos() {
+  if (estado.insightsCargando) return;
+
+  estado.insightsCargando = true;
+  estado.errorInsights = null;
+  pintar();
+
+  try {
+    const desde = mesesAtras(estado.periodo, MESES_ANALIZADOS);
+    const historial = await traerMovimientos({ desde, hasta: estado.periodo.hasta });
+
+    const agregados = armarAgregados({
+      movimientos: estado.movimientos,
+      previos: estado.movimientosPrevios,
+      historial,
+      moneda: estado.moneda,
+      etiquetaPeriodo: estado.periodo.etiqueta,
+    });
+
+    estado.insights = await pedirInsights(agregados);
+    estado.insightsPedidos = true;
+  } catch (problema) {
+    estado.errorInsights = problema.message;
+  } finally {
+    estado.insightsCargando = false;
+    pintar();
+  }
+}
+
+/** El primer día del mes que está `cantidad` meses antes del período. */
+function mesesAtras(periodo, cantidad) {
+  const [anio, mes] = periodo.desde.split("-").map(Number);
+  const fecha = new Date(anio, mes - 1 - cantidad, 1);
+  const mm = String(fecha.getMonth() + 1).padStart(2, "0");
+  return `${fecha.getFullYear()}-${mm}-01`;
 }
 
 // --------------------------------------------------------------------------
