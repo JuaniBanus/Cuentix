@@ -19,6 +19,7 @@ from app.insights import AgregadosGastos, InsightsError
 from app.insights import generar as generar_insights
 from app.mercado import MercadoError, SinClave, ValorInvalido
 from app.mercado import cerrar_cliente as cerrar_cliente_mercado
+from app.mercado import historico as historico_de_mercado
 from app.mercado import indice as indice_de_mercado
 from app.mercado import precio as precio_de_mercado
 from app.mercado import presupuesto as presupuesto_mercado
@@ -138,6 +139,19 @@ async def api_precio(ticker: str, mercado: str = "us") -> dict:
         return await precio_de_mercado(ticker, mercado)
     # El orden importa: las dos heredan de MercadoError y Python entra por la
     # primera que coincide, así que las específicas van antes que la general.
+    except ValorInvalido as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SinClave as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except MercadoError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@app.get("/api/historico")
+async def api_historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
+    """Cierres diarios de un activo, del más viejo al más nuevo."""
+    try:
+        return await historico_de_mercado(ticker, mercado, dias)
     except ValorInvalido as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except SinClave as exc:

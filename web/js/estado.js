@@ -45,6 +45,16 @@ export const estado = {
   errorPrecios: null,
   // Tickers que CoinGecko no supo cotizar, para poder aclararlo.
   sinCotizar: [],
+  // Precios de acciones, ETFs, CEDEARs y bonos, del proxy del bot. La clave
+  // lleva el mercado adelante ("us:AAPL") porque el mismo ticker puede ser dos
+  // activos distintos según dónde cotice.
+  preciosMercado: {},
+  errorMercado: null,
+  sinCoberturaMercado: [],
+  // Gráfico histórico abierto: {ticker, mercado, cargando, error, puntos, moneda}.
+  // null = ninguno. Vive acá y no en la pantalla porque cada toque del ojo la
+  // redibuja entera y una variable local se perdería.
+  historico: null,
   // Panel de Insights de Gastos. El análisis se pide a mano, así que hace
   // falta recordar si ya se pidió: sin `insightsPedidos` no se distingue
   // "todavía no lo pediste" de "lo pedí y no había nada para decir".
@@ -76,6 +86,10 @@ export function reiniciarEstado() {
   estado.precios = {};
   estado.errorPrecios = null;
   estado.sinCotizar = [];
+  estado.preciosMercado = {};
+  estado.errorMercado = null;
+  estado.sinCoberturaMercado = [];
+  estado.historico = null;
   estado.insights = [];
   estado.insightsCargando = false;
   estado.insightsPedidos = false;

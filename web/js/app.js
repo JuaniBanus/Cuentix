@@ -17,6 +17,7 @@ import { estado, reiniciarEstado } from "./estado.js";
 import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
 import { anterior, mesActual } from "./periodo.js";
+import { traerHistorico, traerPrecios } from "./mercado.js";
 import { traerPreciosCripto } from "./precios.js";
 import { registrarServiceWorker } from "./pwa.js";
 import { montarNavegacion, pintar } from "./router.js";
@@ -56,6 +57,7 @@ async function arrancar() {
       borrarObjetivo,
       alEntrarA: cargarLoDelTab,
       recargarInversiones: cargarInversiones,
+      verHistorico,
       analizarGastos,
     },
   });
@@ -288,17 +290,66 @@ async function cargarInversiones() {
     return;
   }
 
-  // Se pinta la cartera antes de ir a buscar los precios: el valor a costo ya
-  // es información útil, y CoinGecko puede tardar o no estar.
+  // Se pinta la cartera antes de ir a buscar los precios: el valor a costo o
+  // el último conocido ya es información útil, y los proveedores pueden tardar.
   pintar();
 
-  const tickers = estado.inversiones.filter((i) => i.ticker).map((i) => i.ticker);
-  if (!tickers.length) return;
+  const conTicker = estado.inversiones.filter((i) => i.ticker);
+  if (!conTicker.length) return;
 
-  const { precios, sinCotizar, error } = await traerPreciosCripto(tickers);
-  estado.precios = precios;
-  estado.sinCotizar = sinCotizar;
-  estado.errorPrecios = error;
+  // Las dos fuentes son independientes y van en paralelo: CoinGecko lo consulta
+  // el navegador directo y el resto pasa por el proxy del bot. Que una falle no
+  // tiene por qué dejar sin valuar lo que cubre la otra.
+  const [cripto, mercado] = await Promise.allSettled([
+    traerPreciosCripto(conTicker.map((i) => i.ticker)),
+    traerPrecios(conTicker),
+  ]);
+
+  if (cripto.status === "fulfilled") {
+    estado.precios = cripto.value.precios;
+    estado.sinCotizar = cripto.value.sinCotizar;
+    estado.errorPrecios = cripto.value.error;
+  }
+
+  if (mercado.status === "fulfilled") {
+    estado.preciosMercado = mercado.value.precios;
+    estado.sinCoberturaMercado = mercado.value.sinCobertura;
+    estado.errorMercado = mercado.value.error;
+  } else {
+    estado.errorMercado = "No pude traer los precios de mercado.";
+  }
+
+  pintar();
+}
+
+/**
+ * Abre —o cierra, con null— el gráfico histórico de un activo.
+ *
+ * La serie se pide recién al abrir: son ~90 puntos por activo y traerlos para
+ * toda la cartera al entrar sería pagar por adelantado una pantalla que casi
+ * nunca se mira entera.
+ */
+async function verHistorico(ticker, mercado) {
+  if (!ticker) {
+    estado.historico = null;
+    pintar();
+    return;
+  }
+
+  estado.historico = { ticker, mercado, cargando: true, error: null, puntos: [], moneda: null };
+  pintar();
+
+  try {
+    const puntos = await traerHistorico(ticker, mercado);
+    // La moneda sale del mercado y no de la posición: el gráfico muestra la
+    // cotización del papel, que es en la moneda donde cotiza.
+    estado.historico = {
+      ticker, mercado, cargando: false, error: null, puntos,
+      moneda: mercado === "ar" ? "ARS" : "USD",
+    };
+  } catch (problema) {
+    estado.historico = { ticker, mercado, cargando: false, error: problema.message, puntos: [] };
+  }
   pintar();
 }
 

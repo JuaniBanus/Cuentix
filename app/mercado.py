@@ -355,6 +355,93 @@ async def precio(ticker: str, mercado: str = "us") -> dict:
     return {**datos, "cacheado": False, "vencido": False}
 
 
+async def historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
+    """Serie de cierres diarios, del más viejo al más nuevo, para graficar.
+
+    Va en su propio endpoint y no dentro de /api/precio porque son ~90 puntos
+    por activo: pegarlos a cada consulta de precio engordaría la respuesta que
+    más se pide para servir a la pantalla que menos se abre.
+    """
+    ticker = ticker.strip().upper()
+    if not ticker or len(ticker) > 20:
+        raise ValorInvalido("Ticker inválido.")
+
+    mercado = (mercado or "us").strip().lower()
+    if mercado not in ("us", "ar"):
+        raise ValorInvalido("El mercado tiene que ser «us» o «ar».")
+
+    dias = max(7, min(int(dias or 90), 365))
+
+    clave = f"hist:{mercado}:{ticker}:{dias}"
+    guardado = _guardado(clave)
+    if guardado and not guardado[1]:
+        return {**guardado[0], "cacheado": True, "vencido": False}
+
+    if mercado == "ar":
+        datos = await _historico_argentino(ticker, dias)
+    else:
+        if not _hay_cupo():
+            if guardado:
+                return {**guardado[0], "cacheado": True, "vencido": True}
+            raise MercadoError("Se alcanzó el límite de consultas por ahora.")
+        crudo = await _pedir_twelve(
+            "time_series", {"symbol": ticker, "interval": "1day", "outputsize": str(dias)}
+        )
+        valores = crudo.get("values") or []
+        if not valores:
+            raise MercadoError(f"No hay histórico para «{ticker}».")
+        datos = {
+            "simbolo": ticker,
+            "moneda": (crudo.get("meta") or {}).get("currency"),
+            "puntos": [
+                {"fecha": v.get("datetime"), "cierre": _numero(v.get("close"))}
+                # El proveedor los manda del más nuevo al más viejo; un gráfico
+                # se lee al revés, así que se invierten una sola vez acá.
+                for v in reversed(valores)
+                if _numero(v.get("close")) is not None
+            ],
+            "fuente": "twelvedata",
+        }
+
+    _guardar(clave, datos)
+    return {**datos, "cacheado": False, "vencido": False}
+
+
+async def _historico_argentino(ticker: str, dias: int) -> dict:
+    """Data912 tiene histórico por ticker, separado por tipo de instrumento."""
+    for tipo in ("stocks", "cedears", "bonds"):
+        try:
+            respuesta = await _obtener_cliente().get(
+                f"{URL_DATA912}/historical/{tipo}/{ticker}"
+            )
+            if respuesta.status_code != 200:
+                continue
+            filas = respuesta.json()
+        except (httpx.HTTPError, ValueError):
+            continue
+
+        if not isinstance(filas, list) or not filas:
+            continue
+
+        puntos = []
+        for fila in filas[-dias:]:
+            cierre = _numero(fila.get("c") if "c" in fila else fila.get("close"))
+            fecha = fila.get("date") or fila.get("fecha") or fila.get("datetime")
+            if cierre is not None and fecha:
+                puntos.append({"fecha": str(fecha)[:10], "cierre": cierre})
+
+        if puntos:
+            puntos.sort(key=lambda p: p["fecha"])
+            return {
+                "simbolo": ticker,
+                "moneda": "ARS",
+                "puntos": puntos,
+                "fuente": f"data912:{tipo}",
+            }
+
+    raise MercadoError(f"No hay histórico argentino para «{ticker}».")
+
+
 # Los índices se piden con el símbolo que usa cada proveedor. El "^" es la
 # convención de Yahoo y Twelve Data no lo quiere, así que se traduce acá en vez
 # de obligar a la web a saber de estas diferencias.

@@ -51,7 +51,14 @@ const IDS_COINGECKO = {
   DAI2: "dai",
 };
 
-/** true si el tipo de activo puede tener precio de mercado hoy. */
+/**
+ * true si el precio de este tipo sale de CoinGecko.
+ *
+ * Ya no significa "el único tipo con precio de mercado": las acciones, ETFs,
+ * CEDEARs y bonos también se valúan, pero por el proxy del bot (mercado.js).
+ * Lo que distingue a la cripto es que su fuente es pública y con CORS, así que
+ * el navegador la consulta directo y sin clave.
+ */
 export function tienePrecioDeMercado(tipo) {
   return tipo === "cripto";
 }
