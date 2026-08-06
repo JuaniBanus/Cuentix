@@ -558,6 +558,44 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-bottom: 1px dotted var(--borde-fuerte); cursor: help;
 }
 
+/* Precio guardado: se ve, pero apagado. Es un dato válido con una salvedad,
+   no un error ni una cifra de primera línea. */
+.posicion-vieja { color: var(--tenue-2); font-style: italic; opacity: .9; }
+
+.posicion-grafico {
+  margin-top: 3px; padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--borde-fuerte);
+  border-radius: 999px;
+  color: var(--tenue-2);
+  font-size: 11px;
+}
+.posicion-grafico:hover { color: var(--acento-tinta); border-color: var(--acento); }
+
+/* ------------------------------------------------- Gráfico de precio */
+
+.precio-grafico { display: flex; flex-direction: column; gap: 6px; }
+.precio-cabecera { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.precio-actual { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.precio-var { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
+.precio-var .apunte-tenue { display: block; font-size: 11.5px; }
+
+/* La altura es fija y el ancho se estira: preserveAspectRatio="none" deforma
+   el trazo, y por eso la línea lleva vector-effect para no engordar con él. */
+.precio-svg {
+  display: block; width: 100%; height: 120px;
+  cursor: crosshair; touch-action: none;
+}
+.precio-linea { stroke: currentColor; }
+.precio-area { fill: currentColor; opacity: .12; }
+.precio-guia { stroke: var(--borde-fuerte); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.precio-punto { fill: currentColor; stroke: var(--superficie); stroke-width: 2; }
+
+.precio-pie {
+  display: flex; justify-content: space-between;
+  font-size: 11.5px; color: var(--tenue-2);
+}
+
 /* -------------------------------------------------------------- Objetivos */
 
 .tarjeta-cabecera {
