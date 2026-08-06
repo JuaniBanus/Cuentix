@@ -100,6 +100,17 @@ CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
 # compras de inversión), con un mensaje que explica qué configurar.
 SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")
 
+# Clave de Twelve Data, para el proxy de precios de mercado.
+#
+# Va acá y NUNCA en web/js/: el navegador muestra todo lo que carga, así que
+# una clave en el front es una clave pública. Ese es el motivo de que exista
+# el proxy de app/mercado.py.
+#
+# Se saca gratis en twelvedata.com. Es opcional: sin ella el proxy sigue
+# sirviendo los papeles argentinos (Data912 no pide clave) y responde 503 para
+# lo demás, explicando qué falta.
+TWELVE_DATA_API_KEY: str | None = _opcional("TWELVE_DATA_API_KEY")
+
 # Desde qué orígenes puede llamar la web al endpoint de insights.
 #
 # Hace falta porque el front y el bot NO comparten origen: la web es estática y

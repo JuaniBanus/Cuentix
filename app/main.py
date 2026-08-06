@@ -17,6 +17,11 @@ from app.comandos import respuesta_directa
 from app.config import CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
 from app.insights import AgregadosGastos, InsightsError
 from app.insights import generar as generar_insights
+from app.mercado import MercadoError, SinClave, ValorInvalido
+from app.mercado import cerrar_cliente as cerrar_cliente_mercado
+from app.mercado import indice as indice_de_mercado
+from app.mercado import precio as precio_de_mercado
+from app.mercado import presupuesto as presupuesto_mercado
 from app.sesion_web import SesionInvalida
 from app.sesion_web import cerrar_cliente as cerrar_cliente_sesion
 from app.sesion_web import verificar as verificar_sesion
@@ -75,6 +80,7 @@ async def lifespan(app: FastAPI):
     yield
     await cerrar_cliente()  # cierra el AsyncClient de httpx
     await cerrar_cliente_sesion()  # el que valida las sesiones de la web
+    await cerrar_cliente_mercado()  # el del proxy de precios
     logger.info("Clientes HTTP cerrados")
 
 
@@ -102,6 +108,61 @@ else:
 async def salud() -> dict[str, str]:
     """Chequeo de vida, para monitoreo o para ver que levantó bien."""
     return {"status": "ok"}
+
+
+# --------------------------------------------------------------------------
+# Proxy de precios de mercado
+# --------------------------------------------------------------------------
+#
+# Van en el backend del bot y no en una función serverless por el CACHÉ. El
+# plan gratuito del proveedor da 800 llamadas por día, así que cachear es
+# obligatorio, y el caché de app/mercado.py es un diccionario en memoria: sirve
+# porque este proceso vive entre pedidos. En serverless cada invocación puede
+# arrancar un proceso nuevo, el caché no sobreviviría y haría falta un KV
+# aparte —otra cuenta, otro secreto, otra pieza que puede fallar—.
+#
+# Estos dos endpoints NO piden sesión, al revés que /insights. Devuelven
+# cotizaciones públicas, iguales para todos, sin nada del usuario. Lo que se
+# protege es la clave, y para eso alcanza con que no salga del servidor.
+
+
+@app.get("/api/precio")
+async def api_precio(ticker: str, mercado: str = "us") -> dict:
+    """Precio actual, variación diaria/semanal/mensual y máximos y mínimos.
+
+    `mercado=us` (default) para NASDAQ/NYSE, `mercado=ar` para BYMA. No es un
+    detalle: AAPL existe en los dos y son activos distintos, en monedas
+    distintas y con precios que difieren por ochenta veces.
+    """
+    try:
+        return await precio_de_mercado(ticker, mercado)
+    # El orden importa: las dos heredan de MercadoError y Python entra por la
+    # primera que coincide, así que las específicas van antes que la general.
+    except ValorInvalido as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SinClave as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except MercadoError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@app.get("/api/indice")
+async def api_indice(symbol: str) -> dict:
+    """Valor de un índice. Acepta ^GSPC (S&P 500) y ^MERV (Merval)."""
+    try:
+        return await indice_de_mercado(symbol)
+    except ValorInvalido as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SinClave as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except MercadoError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+
+@app.get("/api/cuota")
+async def api_cuota() -> dict:
+    """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
+    return presupuesto_mercado()
 
 
 @app.post("/insights")
