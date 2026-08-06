@@ -20,7 +20,7 @@
 //
 // En Render el dominio es https://<nombre-del-servicio>.onrender.com.
 // Vacío = el panel queda desactivado y lo dice en pantalla, sin romper nada.
-export const BACKEND_URL = "";
+export const BACKEND_URL = "https://cuentix-bot.onrender.com";
 
 export const SUPABASE_URL = "https://jyzvpakixjydvspwuexv.supabase.co";
 
