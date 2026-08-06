@@ -17,8 +17,10 @@ create table if not exists public.movimientos (
     -- modelo. Siempre positivo: el signo lo aporta `tipo`.
     monto       numeric(14,2) not null check (monto > 0),
 
+    -- Los tres valores de Moneda (app/models.py). Si se agrega uno nuevo,
+    -- hay que ampliar este check o el insert falla.
     moneda      text          not null default 'ARS'
-                check (moneda in ('ARS', 'USD')),
+                check (moneda in ('ARS', 'USD', 'EUR')),
 
     -- Se guarda normalizada en minúsculas (ver _aplicar_filtros en app/db.py:94:
     -- el filtro compara con eq, así que un 'Super' guardado nunca matchearía).
@@ -108,7 +110,10 @@ create table if not exists public.objetivos (
     descripcion     text          check (descripcion is null or char_length(descripcion) <= 300),
 
     monto_objetivo  numeric(14,2) not null check (monto_objetivo > 0),
-    moneda          text          not null default 'ARS' check (moneda in ('ARS', 'USD')),
+    -- Los mismos tres códigos que `movimientos`: un ahorro en euros se imputa
+    -- a un objetivo, y si acá no entrara EUR el objetivo no se podría crear.
+    moneda          text          not null default 'ARS'
+                                  check (moneda in ('ARS', 'USD', 'EUR')),
 
     -- Nullable: un objetivo puede no tener fecha ("cambiar el auto, algún día").
     fecha_estimada  date,

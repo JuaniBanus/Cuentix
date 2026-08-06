@@ -7,14 +7,16 @@ import {
   editarObjetivo,
   salir,
   sesionActual,
+  traerInversiones,
   traerMovimientos,
   traerObjetivos,
   traerPeriodo,
 } from "./data.js";
-import { traerCotizacion } from "./dolar.js";
+import { resumenDeTasas, traerCotizaciones } from "./cotizaciones.js";
 import { estado, reiniciarEstado } from "./estado.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
 import { anterior, mesActual } from "./periodo.js";
+import { traerPreciosCripto } from "./precios.js";
 import { registrarServiceWorker } from "./pwa.js";
 import { montarNavegacion, pintar } from "./router.js";
 import { fijarPeriodo, montarSelectorPeriodo } from "./selectorPeriodo.js";
@@ -46,7 +48,14 @@ async function arrancar() {
   montarNavegacion({
     nav: document.querySelector("#tabs"),
     contenido,
-    acciones: { onSalir: cerrarSesion, recargar: cargarDatos, guardarObjetivo, borrarObjetivo },
+    acciones: {
+      onSalir: cerrarSesion,
+      recargar: cargarDatos,
+      guardarObjetivo,
+      borrarObjetivo,
+      alEntrarA: cargarLoDelTab,
+      recargarInversiones: cargarInversiones,
+    },
   });
   montarSelectorPeriodo({
     periodoInicial: estado.periodo,
@@ -198,17 +207,72 @@ async function borrarObjetivo(id) {
 }
 
 // --------------------------------------------------------------------------
-// Cotización del dólar
+// Inversiones
 // --------------------------------------------------------------------------
 
 /**
- * No bloquea el arranque: la app se dibuja con los movimientos y, cuando la
- * cotización llega, se repinta sola. Si no llega, la app funciona igual y el
- * botón de dólares queda desactivado.
+ * Trae lo que una pantalla necesita y la carga inicial no pidió.
+ *
+ * Las tenencias y sus precios se piden al entrar a Inversiones y no al
+ * arrancar: quien no invierte no tiene por qué pagar dos consultas a APIs
+ * externas en cada apertura de la app.
+ */
+function cargarLoDelTab(tab) {
+  if (tab === "inversiones" && estado.inversiones === null) cargarInversiones();
+}
+
+async function cargarInversiones() {
+  try {
+    estado.inversiones = await traerInversiones();
+    estado.errorInversiones = null;
+  } catch (problema) {
+    // Se guarda el error en vez de dejar la lista vacía: "no tenés inversiones"
+    // y "no pude leerlas" no son lo mismo, y mostrar lo primero cuando pasó lo
+    // segundo es decirle al usuario algo falso sobre su plata.
+    estado.errorInversiones = problema;
+    pintar();
+    return;
+  }
+
+  // Se pinta la cartera antes de ir a buscar los precios: el valor a costo ya
+  // es información útil, y CoinGecko puede tardar o no estar.
+  pintar();
+
+  const tickers = estado.inversiones.filter((i) => i.ticker).map((i) => i.ticker);
+  if (!tickers.length) return;
+
+  const { precios, sinCotizar, error } = await traerPreciosCripto(tickers);
+  estado.precios = precios;
+  estado.sinCotizar = sinCotizar;
+  estado.errorPrecios = error;
+  pintar();
+}
+
+// --------------------------------------------------------------------------
+// Cotizaciones
+// --------------------------------------------------------------------------
+
+let TITULO_DOLAR = null;
+
+/**
+ * No bloquea el arranque: la app se dibuja con los movimientos y, cuando las
+ * cotizaciones llegan, se repinta sola. Si no llegan, la app funciona igual y
+ * el botón de dólares queda desactivado.
+ *
+ * Se guarda con `venta` y `fecha` además de las tasas porque las pantallas ya
+ * leían esos dos campos cuando la única cotización era la del dólar oficial.
  */
 async function cargarCotizacion() {
   try {
-    fijarCotizacion(await traerCotizacion());
+    const cotizaciones = await traerCotizaciones();
+    fijarCotizacion({
+      venta: cotizaciones.arsPorUsd,
+      fecha: cotizaciones.actualizado ?? "",
+      vencida: false,
+      tasas: cotizaciones.tasas,
+      eurAproximado: cotizaciones.eurAproximado,
+      resumen: resumenDeTasas(cotizaciones),
+    });
     estado.falloCotizacion = false;
   } catch {
     fijarCotizacion(null);
@@ -217,7 +281,10 @@ async function cargarCotizacion() {
 
   const boton = document.querySelector("#btn-dolar");
   boton.disabled = estado.falloCotizacion;
-  boton.title = estado.falloCotizacion ? "No pude traer la cotización del dólar" : "Ver todo en dólares";
+  // El title bueno —el que explica que se valúa a hoy— es el del HTML: se
+  // guarda una vez y se restaura, en vez de reescribirlo acá y perderlo.
+  TITULO_DOLAR ??= boton.title;
+  boton.title = estado.falloCotizacion ? "No pude traer las cotizaciones" : TITULO_DOLAR;
 
   if (!vistas.app.hidden) pintar();
 }

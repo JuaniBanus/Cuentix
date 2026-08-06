@@ -97,10 +97,16 @@
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-calendario"></use></svg>
         <span id="periodo-etiqueta">mes</span>
       </button>
-      <!-- Convierte lo que se muestra al dólar oficial. Arranca desactivado y
-           se habilita cuando llega la cotización. -->
+      <!-- Convierte lo que se muestra a dólares: los pesos al oficial y los
+           euros a la paridad del BCE. Arranca desactivado y se habilita cuando
+           llegan las cotizaciones.
+
+           El title aclara cómo se valúa, y se repite en aria-label porque los
+           lectores de pantalla no anuncian title en un botón que ya tiene
+           nombre accesible. -->
       <button id="btn-dolar" class="boton-icono es-texto" aria-pressed="false"
-              aria-label="Ver todo en dólares" title="Ver todo en dólares" disabled>US$</button>
+              aria-label="Ver todo en dólares. Los movimientos en otras monedas se valúan al tipo de cambio de hoy, no al del día en que ocurrieron."
+              title="Ver todo en USD&#10;&#10;Convierte ARS y EUR al tipo de cambio de HOY.&#10;Los movimientos históricos se valúan a hoy, no al&#10;cambio del día en que ocurrieron." disabled>US$</button>
       <button id="btn-ojo" class="boton-icono" aria-pressed="false" aria-label="Ocultar montos">
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-ojo"></use></svg>
       </button>

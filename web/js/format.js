@@ -21,9 +21,14 @@ export const alternarOcultos = () => (oculto = !oculto);
 // puerta por la que sale un número a la vista, así que alcanza con tocarla acá
 // para que el botón valga en toda la app, gráficos incluidos.
 //
-// Los pesos y los dólares se siguen sumando por separado: esto convierte lo que
-// se MUESTRA, no junta las dos monedas en un total. Sumarlas daría un número
-// que depende de la cotización del día y que cambiaría solo.
+// Las monedas se siguen sumando por separado: esto convierte lo que se MUESTRA,
+// no junta varias monedas en un total. Sumarlas daría un número que depende de
+// la cotización del día y que cambiaría solo.
+//
+// La tasa de cada moneda dice cuántos USD vale una unidad, así que convertir es
+// siempre multiplicar. Para los pesos eso es 1/(ARS por USD), o sea lo mismo que
+// dividir por la venta del oficial; el euro entra por la misma puerta sin que
+// las pantallas tengan que saber que existe.
 
 let enDolares = false;
 let cotizacion = null;
@@ -44,9 +49,29 @@ export function alternarDolares() {
   return enDolares;
 }
 
-/** El valor convertido, si corresponde. Solo los pesos se convierten. */
+/**
+ * Cuántos USD vale una unidad de `moneda`, o null si no se puede cotizar.
+ *
+ * Los dólares valen 1 sin depender de que haya llegado ninguna cotización: son
+ * la unidad en la que se convierte.
+ */
+export function tasaAUSD(moneda) {
+  if (moneda === "USD") return 1;
+  const tasa = cotizacion?.tasas?.[moneda];
+  return Number.isFinite(tasa) ? tasa : null;
+}
+
+/** true si el modo dólar está activo y esta moneda se puede convertir. */
+const seConvierte = (moneda) => enDolares && moneda !== "USD" && tasaAUSD(moneda) !== null;
+
+/**
+ * El valor convertido, si corresponde.
+ *
+ * Una moneda sin cotización vuelve intacta: mostrarla en su moneda es preferible
+ * a esconderla de un total que el usuario cree completo.
+ */
 export function enDolaresSiCorresponde(valor, moneda) {
-  return enDolares && cotizacion && moneda === "ARS" ? valor / cotizacion.venta : valor;
+  return seConvierte(moneda) ? valor * tasaAUSD(moneda) : valor;
 }
 
 /** Suma montos en centavos enteros: 8500.10 + 1200.20 en float da 9700.2999… */
@@ -63,8 +88,8 @@ export function monto(valor, moneda = "ARS", { signo = false } = {}) {
   // El ojo tapado gana: si están ocultos, no importa en qué moneda.
   if (oculto) return "••••••";
 
-  if (enDolares && cotizacion && moneda === "ARS") {
-    valor = valor / cotizacion.venta;
+  if (seConvierte(moneda)) {
+    valor = valor * tasaAUSD(moneda);
     moneda = "USD";
   }
 

@@ -22,7 +22,15 @@ from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 from app.config import GEMINI_API_KEY
-from app.models import Consulta, Intencion, Moneda, Movimiento, TipoMovimiento
+from app.models import (
+    Consulta,
+    Intencion,
+    Inversion,
+    Moneda,
+    Movimiento,
+    TipoInversion,
+    TipoMovimiento,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,10 +84,24 @@ class _ConsultaExtraida(BaseModel):
     etiqueta_periodo: str | None = None
 
 
+# Todo opcional salvo el tipo: una compra mal contada ("compré bitcoin") tiene
+# que poder volver con los huecos marcados, para preguntar en vez de inventar.
+class _InversionExtraida(BaseModel):
+    tipo: TipoInversion | None = None
+    ticker: str | None = None
+    nombre: str | None = None
+    cantidad: float | None = None
+    precio_compra: float | None = None
+    moneda: Moneda | None = None
+    fecha_compra: date | None = None
+    sector: str | None = None
+
+
 class _InterpretacionExtraida(BaseModel):
     intencion: Intencion
     movimiento: _MovimientoExtraido | None = None
     consulta: _ConsultaExtraida | None = None
+    inversion: _InversionExtraida | None = None
 
 
 class Interpretacion(NamedTuple):
@@ -88,10 +110,14 @@ class Interpretacion(NamedTuple):
     intencion: Intencion
     movimiento: Movimiento | None = None
     consulta: Consulta | None = None
+    inversion: Inversion | None = None
     # A qué objetivo dijo el usuario que va el ahorro, con sus palabras. Viaja
     # aparte del Movimiento porque no es un dato de la tabla: es la pista para
     # buscar el objetivo, y puede no encontrar ninguno.
     objetivo: str | None = None
+    # Campos que la compra necesita y el mensaje no traía. Si tiene algo,
+    # `inversion` viene en None y hay que preguntar en vez de guardar.
+    faltantes: tuple[str, ...] = ()
 
 
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -135,8 +161,14 @@ MONTOS
 
 MONEDA
 - Si no se aclara, asumí ARS.
-- Usá USD solo si se menciona: "dólares", "usd", "verdes", "billetes", "blue",
+- Usá USD si se menciona: "dólares", "usd", "u$s", "verdes", "billetes", "blue",
   "mep". "Palos verdes" son millones de dólares.
+- Usá EUR si se menciona: "euros", "eur", "€".
+  "gasté 200 euros" -> 200 EUR. "€150" -> 150 EUR. "150 eur" -> 150 EUR.
+- El símbolo "$" solo, sin más aclaración, es ARS: en Argentina "$" son pesos.
+  Solo es USD si además dice "dólares", "verdes" o similar.
+- La jerga de montos (luca, palo, gamba) vale para cualquier moneda:
+  "2 lucas de euros" = 2000 EUR.
 
 TIPO (elegí exactamente uno)
 - gasto: plata que sale y no vuelve. Compras, servicios, comida, transporte,
@@ -212,6 +244,46 @@ DESCRIPCION
   ni comentarios sobre personas. "el regalo para Sofía" -> "regalo".
   "le pagué a mi psicóloga" -> "sesion".
 - Si el mensaje no dice qué fue, repetí la categoría.
+
+====================== SI ES UNA COMPRA DE INVERSIÓN =====================
+Poné intencion="registrar_inversion" y completá "inversion". El resto en null.
+
+Esto es distinto de un movimiento de tipo "inversion". Un movimiento anota
+que salió plata ("puse 500 dólares en cripto"). Una COMPRA anota qué activo
+entró a la cartera, con cantidad y precio unitario, y por eso se puede seguir
+su ganancia después. Elegí registrar_inversion cuando el mensaje nombra un
+activo concreto Y una cantidad:
+  "compré 10 CEDEARs de Apple a US$25"
+  "invertí en 0.5 BTC a 60000 USD"
+  "me compré 100 AL30 a 1200 pesos"
+
+CAMPOS
+- tipo: accion, etf, bono, cedear, fci, cripto o plazo_fijo.
+  Un CEDEAR es un cedear aunque el subyacente sea una acción (Apple, Tesla).
+  Bitcoin, ethereum, USDT y demás son cripto. AL30/GD30/BOPREAL son bonos.
+- ticker: el símbolo en MAYÚSCULAS, sin espacios. Deducilo del nombre cuando
+  sea inequívoco: Apple->AAPL, Bitcoin->BTC, Ethereum->ETH, Tesla->TSLA,
+  Mercado Libre->MELI, Google->GOOGL, Amazon->AMZN, Microsoft->MSFT.
+  Si no lo sabés con certeza, dejalo en null: es preferible vacío a inventado.
+- nombre: cómo lo diría una persona ("Apple", "Bitcoin", "Plazo fijo Galicia").
+- cantidad: cuántas unidades. Acepta decimales (0.5 BTC).
+- precio_compra: precio por UNIDAD, no el total. "10 a US$25" -> 25, no 250.
+  Si el mensaje da solo el total ("puse 250 dólares en 10 cedears"), dividí:
+  250/10 = 25.
+- moneda: del PRECIO. "US$25" o "25 dólares" -> USD. "1200 pesos" -> ARS.
+  "€30" -> EUR. Si no se aclara y el activo es cripto o CEDEAR, asumí USD;
+  si es un bono argentino o un plazo fijo, asumí ARS.
+- fecha_compra: como en los movimientos. Sin fecha, la de hoy.
+- sector: solo si el mensaje lo menciona; si no, null.
+
+DATOS FALTANTES: NO LOS INVENTES
+Si falta algo que no se puede deducir —típicamente el precio o la cantidad—,
+igual poné intencion="registrar_inversion" y devolvé "inversion" con los
+campos que sí tengas y los otros en null. Nunca rellenes un precio con una
+cotización que creas saber ni una cantidad con un 1 por defecto: el sistema
+se encarga de preguntar lo que falte.
+Ejemplo: "compré bitcoin" -> tipo=cripto, ticker=BTC, nombre=Bitcoin,
+cantidad=null, precio_compra=null.
 
 =========================== SI ES UNA CONSULTA ==========================
 Elegí la intención que corresponda, completá "consulta" y dejá
@@ -321,6 +393,80 @@ def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
         raise ParserError(f"Gemini devolvió un movimiento inválido: {exc.errors()}") from exc
 
 
+# Nombre técnico -> cómo pedírselo al usuario.
+_ETIQUETA_FALTANTE = {
+    "tipo": "qué tipo de activo es (acción, cedear, cripto, bono, fci, plazo fijo)",
+    "nombre": "qué compraste",
+    "cantidad": "cuántas unidades compraste",
+    "precio_compra": "a qué precio por unidad",
+}
+
+
+def _decimal_limpio(valor: float) -> Decimal:
+    """float -> Decimal sin ceros de relleno ni basura binaria.
+
+    `Decimal(str(...))` y no `Decimal(float)`, que arrastraría la cola binaria
+    a una columna de 8 decimales. El normalize saca los ceros sobrantes
+    (10.0 -> 10) y el quantize deshace la notación científica que normalize
+    produce con los enteros (10 -> 1E+1), que Postgres no debería tener que
+    interpretar.
+    """
+    numero = Decimal(str(valor)).normalize()
+    if numero == numero.to_integral_value():
+        return numero.quantize(Decimal(1))
+    return numero
+
+
+def _a_inversion(
+    extraida: _InversionExtraida | None, hoy: date
+) -> tuple[Inversion | None, tuple[str, ...]]:
+    """Arma la Inversion, o devuelve qué falta para poder armarla.
+
+    Devuelve (inversion, faltantes). Si `faltantes` tiene algo, `inversion` es
+    None: preferimos preguntar antes que guardar una tenencia a medias, que
+    después arruinaría todos los cálculos de ganancia.
+    """
+    if extraida is None:
+        return None, ("tipo", "nombre", "cantidad", "precio_compra")
+
+    faltantes = [
+        campo
+        for campo in ("tipo", "nombre", "cantidad", "precio_compra")
+        if getattr(extraida, campo) is None
+    ]
+    # Un precio de 0 solo tiene sentido en un plazo fijo o un airdrop; para el
+    # resto es casi siempre el modelo rellenando un hueco.
+    if (
+        extraida.precio_compra == 0
+        and extraida.tipo is not TipoInversion.PLAZO_FIJO
+        and "precio_compra" not in faltantes
+    ):
+        faltantes.append("precio_compra")
+    if extraida.cantidad is not None and extraida.cantidad <= 0:
+        faltantes.append("cantidad")
+
+    if faltantes:
+        return None, tuple(dict.fromkeys(faltantes))
+
+    ticker = (extraida.ticker or "").strip().upper().replace(" ", "") or None
+
+    try:
+        inversion = Inversion(
+            tipo=extraida.tipo,
+            ticker=ticker[:20] if ticker else None,
+            nombre=" ".join(extraida.nombre.split())[:120],
+            cantidad=_decimal_limpio(extraida.cantidad),
+            precio_compra=_decimal_limpio(extraida.precio_compra),
+            moneda=extraida.moneda or Moneda.USD,
+            fecha_compra=extraida.fecha_compra or hoy,
+            sector=(extraida.sector or "").strip()[:60] or None,
+        )
+    except (ValidationError, InvalidOperation, ValueError) as exc:
+        raise ParserError(f"Gemini devolvió una inversión inválida: {exc}") from exc
+
+    return inversion, ()
+
+
 def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     """Normaliza los filtros de la consulta. Sin filtros = todo el historial."""
     if extraida is None:
@@ -408,6 +554,14 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             objetivo=mencion or None
             if extraida.movimiento.tipo is TipoMovimiento.AHORRO
             else None,
+        )
+
+    if extraida.intencion is Intencion.REGISTRAR_INVERSION:
+        inversion, faltantes = _a_inversion(extraida.inversion, hoy)
+        return Interpretacion(
+            intencion=Intencion.REGISTRAR_INVERSION,
+            inversion=inversion,
+            faltantes=faltantes,
         )
 
     if extraida.intencion is Intencion.DESCONOCIDA:

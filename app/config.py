@@ -83,15 +83,19 @@ SUPABASE_KEY: str = _requerida("SUPABASE_KEY")
 # agrega su chat_id separado por coma.
 CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
 
-# UUID del usuario de Supabase dueño de los objetivos de ahorro.
+# UUID del usuario de Supabase dueño de las filas que escribe el bot:
+# los objetivos de ahorro y las inversiones.
 #
-# Hace falta porque `objetivos.user_id` es NOT NULL con DEFAULT auth.uid(), y
-# auth.uid() es null cuando se escribe con la clave service_role: el bot no
-# viaja con la sesión de nadie. Sin este valor puede leer objetivos e imputar
-# ahorros, pero no crear objetivos nuevos.
+# Las dos tablas tienen `user_id uuid not null default auth.uid()`, pero ese
+# default solo se completa cuando el INSERT viaja con el JWT de un usuario
+# logueado. El bot escribe con service_role, donde auth.uid() es NULL, así que
+# tiene que mandarlo explícito o el insert falla.
 #
-# Se saca del panel de Supabase: Authentication -> Users -> tu usuario -> UID.
+# Es el id del usuario de la web, en Supabase -> Authentication -> Users -> UID,
+# o con:
+#   select id, email from auth.users;
 #
-# Es opcional a propósito: si falta, el bot funciona como siempre y solo avisa
-# que los objetivos se crean desde la web.
+# Es opcional a propósito: sin esto el bot lee objetivos e imputa ahorros igual,
+# y solo se rechazan las operaciones que crean filas nuevas (objetivos nuevos y
+# compras de inversión), con un mensaje que explica qué configurar.
 SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")
