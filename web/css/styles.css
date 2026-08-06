@@ -392,6 +392,66 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .tarjeta-pie { margin-top: 12px; }
 
+/* -------------------------------------------------------- Salud financiera */
+
+/* Bandas del score. --suba ya existe para las inversiones y es el mismo verde
+   de "esto va bien", así que se reusa en vez de inventar un segundo verde. */
+.es-buena { color: #6aa84f; }
+.es-media { color: #c27405; }
+:root[data-tema="claro"] .es-buena { color: #3d7328; }
+:root[data-tema="claro"] .es-media { color: #8a5200; }
+
+.gauge { position: relative; margin: 4px auto 0; max-width: 200px; }
+.gauge-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.gauge-pista { stroke: var(--realce); }
+/* El arco hereda el color de la banda (.es-suba, .es-buena…) en vez de tenerlo
+   fijo: así el color del medidor y el del número no se pueden desincronizar. */
+.gauge-relleno { stroke: currentColor; transition: stroke-dasharray .5s ease-out; }
+
+.gauge-centro {
+  position: absolute; left: 0; right: 0; bottom: 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+}
+.gauge-numero { font-size: 34px; font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.gauge-escala { font-size: 11px; color: var(--tenue-2); }
+.gauge-banda { margin-top: 6px; text-align: center; font-size: 14px; font-weight: 500; }
+
+/* Va centrado y pegado al medidor, no al pie de la tarjeta: la advertencia
+   sirve si se lee junto al número, no después del desglose. */
+.salud-parcial {
+  margin-top: 4px; text-align: center;
+  font-size: 11.5px; color: var(--tenue-2);
+}
+
+.salud-desglose {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--borde);
+}
+/* Cuatro columnas arriba y el detalle ocupando el ancho abajo: el nombre y el
+   puntaje se comparan en vertical, y la frase no rompe esa alineación. */
+.salud-fila {
+  display: grid;
+  grid-template-columns: 1fr 72px auto auto;
+  align-items: center; gap: 4px 8px;
+}
+.salud-nombre { font-size: 13.5px; }
+.salud-riel {
+  height: 6px; border-radius: 3px;
+  background: var(--realce); overflow: hidden;
+}
+.salud-relleno { display: block; height: 100%; border-radius: 3px; background: currentColor; }
+.salud-puntos { font-size: 13.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.salud-peso { font-size: 11.5px; color: var(--tenue-2); }
+.salud-detalle {
+  grid-column: 1 / -1;
+  font-size: 12px; color: var(--tenue-2); line-height: 1.4;
+}
+
+.salud-parrafo { margin-top: 10px; font-size: 13px; color: var(--tenue); line-height: 1.5; }
+.salud-parrafo strong { color: var(--texto); font-weight: 500; }
+.salud-falta { color: var(--tenue-2); }
+
 /* --------------------------------------------------------------- Insights */
 
 .insights { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
