@@ -41,3 +41,10 @@ services:
       # así el repo no queda atado a una cuenta concreta.
       - key: SUPABASE_USER_ID
         sync: false
+      # Dominios desde los que la web puede llamar al backend.
+      - key: ORIGENES_WEB
+        sync: false
+      # Clave del proveedor de precios. Secreta: es la razón de que el proxy
+      # /api/precio exista en vez de que la web llame al proveedor directo.
+      - key: TWELVE_DATA_API_KEY
+        sync: false
