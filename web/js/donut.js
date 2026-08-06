@@ -35,12 +35,23 @@ export function colorDeCategoria(indice) {
  *   —las barras de Gastos, con los mismos colores en el mismo orden—: la
  *   identidad nunca puede quedar solo en el color.
  */
-export function renderDona(contenedor, datos, { moneda, total, conLeyenda = true }) {
+// `tituloTotal` y `unidad` son lo único que cambia entre repartos: la dona de
+// Gastos suma gastos por categoría y la de Inversiones, tenencias por tipo.
+// Decir "Gastado / categorías" sobre un portafolio sería sencillamente falso.
+export function renderDona(
+  contenedor,
+  datos,
+  { moneda, total, conLeyenda = true, tituloTotal = "Gastado", unidad = ["categoría", "categorías"] }
+) {
   let seleccionado = null;
 
   function dibujar() {
     const centro = seleccionado === null
-      ? { titulo: "Gastado", valor: total, detalle: `${datos.length} ${datos.length === 1 ? "categoría" : "categorías"}` }
+      ? {
+          titulo: tituloTotal,
+          valor: total,
+          detalle: `${datos.length} ${datos.length === 1 ? unidad[0] : unidad[1]}`,
+        }
       : {
           titulo: datos[seleccionado].categoria,
           valor: datos[seleccionado].total,

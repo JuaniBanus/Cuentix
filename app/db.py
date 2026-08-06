@@ -26,12 +26,13 @@ from postgrest import APIError
 from supabase import Client, create_client
 
 from app.config import SUPABASE_KEY, SUPABASE_URL, SUPABASE_USER_ID
-from app.models import Moneda, Movimiento, TipoMovimiento
+from app.models import Inversion, Moneda, Movimiento, TipoMovimiento
 
 logger = logging.getLogger(__name__)
 
 TABLA = "movimientos"
 TABLA_OBJETIVOS = "objetivos"
+TABLA_INVERSIONES = "inversiones"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -324,6 +325,52 @@ def _seleccionar_imputados(objetivo_id: str, moneda: Moneda) -> list[dict]:
     except Exception as exc:
         logger.exception("Error de red consultando el progreso")
         raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+# --------------------------------------------------------------------------
+# Inversiones
+# --------------------------------------------------------------------------
+
+
+def guardar_inversion(inversion: Inversion) -> str:
+    """Inserta una tenencia en `inversiones` y devuelve su id (uuid).
+
+    El `user_id` va explícito: el default auth.uid() de la tabla no se completa
+    con service_role, que es como escribe el bot.
+    """
+    if not SUPABASE_USER_ID:
+        raise DBError(
+            "Falta SUPABASE_USER_ID en la configuración: sin ese dato no se "
+            "puede saber de quién es la inversión."
+        )
+
+    fila = {
+        "user_id": SUPABASE_USER_ID,
+        "tipo": inversion.tipo.value,
+        "ticker": inversion.ticker,
+        "nombre": inversion.nombre,
+        # str() y no float(): el JSON lleva el decimal exacto y Postgres lo
+        # castea a numeric sin pasar por punto flotante.
+        "cantidad": str(inversion.cantidad),
+        "precio_compra": str(inversion.precio_compra),
+        "moneda": inversion.moneda.value,
+        "fecha_compra": inversion.fecha_compra.isoformat(),
+        "sector": inversion.sector,
+    }
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_INVERSIONES).insert(fila).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el insert de inversión: %s", detalle)
+        raise DBError(f"No pude guardar la inversión: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando la inversión")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El insert de inversión no devolvió la fila creada.")
+    return str(respuesta.data[0]["id"])
 
 
 class Total:

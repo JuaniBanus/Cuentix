@@ -22,10 +22,23 @@ class Moneda(str, Enum):
     EUR = "EUR"
 
 
+class TipoInversion(str, Enum):
+    """Clase de activo. Coincide con el check de la tabla `inversiones`."""
+
+    ACCION = "accion"
+    ETF = "etf"
+    BONO = "bono"
+    CEDEAR = "cedear"
+    FCI = "fci"
+    CRIPTO = "cripto"
+    PLAZO_FIJO = "plazo_fijo"
+
+
 class Intencion(str, Enum):
     """Qué quiso hacer el usuario con su mensaje."""
 
     REGISTRAR = "registrar"
+    REGISTRAR_INVERSION = "registrar_inversion"
     TOTAL_POR_TIPO = "total_por_tipo"
     TOTAL_POR_CATEGORIA = "total_por_categoria"
     BALANCE = "balance"
@@ -60,6 +73,29 @@ class Movimiento(BaseModel):
     # Es distinto de `categoria`: en "puse 100 lucas en un plazo fijo del
     # banco", la categoría es "plazo fijo" y la cuenta es "banco".
     cuenta: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class Inversion(BaseModel):
+    """Una tenencia comprada: qué, cuánto y a qué precio.
+
+    Espeja la tabla `inversiones`. `user_id` no está acá: lo agrega db.py al
+    insertar, porque sale de la configuración y no del mensaje del usuario.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    tipo: TipoInversion
+    # AAPL, BTC, AL30. Un plazo fijo puede no tener ticker.
+    ticker: str | None = Field(default=None, max_length=20)
+    nombre: str = Field(min_length=1, max_length=120)
+    # 8 decimales: 0.00000001 BTC tiene que sobrevivir. Es la misma precisión
+    # que numeric(24,8) en la tabla.
+    cantidad: Decimal = Field(gt=0, max_digits=24, decimal_places=8)
+    precio_compra: Decimal = Field(ge=0, max_digits=24, decimal_places=8)
+    # Default USD y no ARS: las tenencias se cotizan casi siempre en dólares.
+    moneda: Moneda = Moneda.USD
+    fecha_compra: date
+    sector: str | None = Field(default=None, max_length=60)
 
 
 class Consulta(BaseModel):

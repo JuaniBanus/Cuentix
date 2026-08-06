@@ -153,6 +153,53 @@ export function traerPeriodo({ desde, hasta }) {
 }
 
 // --------------------------------------------------------------------------
+// Inversiones
+// --------------------------------------------------------------------------
+//
+// Son tenencias, no movimientos: no se acotan por período. Una acción comprada
+// hace dos años sigue estando en la cartera este mes, así que filtrarla por
+// fecha mostraría un portafolio vacío en cuanto no se compre nada.
+
+/** Las tenencias del usuario, de la compra más reciente a la más vieja. */
+export async function traerInversiones() {
+  const filas = [];
+
+  for (let pagina = 0; ; pagina++) {
+    const consulta = sb
+      .from("inversiones")
+      .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra, sector")
+      .order("fecha_compra", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(pagina * PAGINA, (pagina + 1) * PAGINA - 1);
+
+    const { data } = await pedir(() => consulta, traducirErrorDeInversiones);
+
+    filas.push(...data);
+    if (data.length < PAGINA) {
+      // numeric llega como string desde PostgREST cuando excede el rango
+      // seguro de float, y como número cuando no: se normaliza acá una vez.
+      return filas.map((f) => ({
+        ...f,
+        cantidad: Number(f.cantidad),
+        precio_compra: Number(f.precio_compra),
+      }));
+    }
+  }
+}
+
+function traducirErrorDeInversiones(error) {
+  if (error?.code === "PGRST301" || /jwt|permission/i.test(error?.message ?? "")) {
+    return "La sesión venció o la policy de lectura no está creada.";
+  }
+  // La tabla se crea con migrations/002_inversiones.sql. Sin ella el error de
+  // PostgREST es un 404 críptico, y el problema real es que falta correr eso.
+  if (error?.code === "42P01" || /does not exist/i.test(error?.message ?? "")) {
+    return "Todavía no está creada la tabla de inversiones.";
+  }
+  return "No pudimos leer tus inversiones. Probá de nuevo en un momento.";
+}
+
+// --------------------------------------------------------------------------
 // Objetivos de ahorro
 // --------------------------------------------------------------------------
 //

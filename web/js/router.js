@@ -20,7 +20,9 @@ export const TABS = [
   { id: "inicio", nombre: "Inicio", icono: "i-casa", render: renderInicio, datos: true },
   { id: "gastos", nombre: "Gastos", icono: "i-gastos", render: renderGastos, datos: true },
   { id: "ahorros", nombre: "Ahorros", icono: "i-ahorro", render: renderAhorros, datos: true },
-  { id: "inversiones", nombre: "Inversiones", icono: "i-inversion", render: renderInversiones, datos: true },
+  // Sin `datos`: la cartera tiene su propia consulta y no sale de los
+  // movimientos del período, así que un fallo de esos no la deja sin mostrar.
+  { id: "inversiones", nombre: "Inversiones", icono: "i-inversion", render: renderInversiones },
   { id: "usuario", nombre: "Usuario", icono: "i-usuario", render: renderUsuario },
 ];
 
@@ -48,6 +50,9 @@ export function montarNavegacion(opciones) {
 export function irA(tab) {
   if (estado.tab === tab) return;
   estado.tab = tab;
+  // Hay pantallas con datos propios que no vienen en la carga inicial. Se
+  // avisa acá y no en cada una para que sigan siendo funciones de pintado.
+  acciones.alEntrarA?.(tab);
   estado.categoriaAbierta = null;
   estado.vistaObjetivo = null;
   estado.confirmandoBorrado = false;
@@ -92,6 +97,12 @@ export function pintar() {
     periodo: estado.periodo,
     moneda: estado.moneda,
     monedas: estado.monedas,
+    inversiones: estado.inversiones,
+    errorInversiones: estado.errorInversiones,
+    recargarInversiones: acciones.recargarInversiones,
+    precios: estado.precios,
+    errorPrecios: estado.errorPrecios,
+    sinCotizar: estado.sinCotizar,
     categoriaAbierta: estado.categoriaAbierta,
     email: estado.email,
     setMoneda: (m) => {

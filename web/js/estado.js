@@ -31,6 +31,20 @@ export const estado = {
   guardando: false,
   errorObjetivo: null,
   confirmandoBorrado: false,
+  // Tenencias. No se acotan por período —son un stock, no movimientos— y se
+  // traen recién al entrar al tab: quien no invierte no paga esa consulta.
+  // null = todavía no se pidieron. [] = se pidieron y no hay ninguna.
+  inversiones: null,
+  // Si la consulta de tenencias falló, acá queda el ErrorAmable. Va aparte de
+  // `error` porque las inversiones no dependen del período: que fallen los
+  // movimientos no tiene por qué dejar la cartera sin mostrar, ni al revés.
+  errorInversiones: null,
+  // Precio de mercado por ticker, de CoinGecko. Solo la cripto tiene; el resto
+  // se muestra a precio de compra y se dice en pantalla.
+  precios: {},
+  errorPrecios: null,
+  // Tickers que CoinGecko no supo cotizar, para poder aclararlo.
+  sinCotizar: [],
   // Categoría abierta en Gastos. Vive acá y no adentro de la pantalla porque
   // cada toque del ojo la redibuja entera, y una variable local se perdería.
   categoriaAbierta: null,
@@ -50,6 +64,11 @@ export function reiniciarEstado() {
   estado.movimientos = [];
   estado.movimientosPrevios = [];
   estado.historialAhorros = [];
+  estado.inversiones = null;
+  estado.errorInversiones = null;
+  estado.precios = {};
+  estado.errorPrecios = null;
+  estado.sinCotizar = [];
   estado.categoriaAbierta = null;
   estado.objetivos = [];
   estado.vistaObjetivo = null;
