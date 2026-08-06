@@ -77,3 +77,17 @@ SUPABASE_KEY: str = _requerida("SUPABASE_KEY")
 # se mezclarían con los propios en la misma tabla. Para sumar a alguien, se
 # agrega su chat_id separado por coma.
 CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
+
+# Dueño de las filas que escribe el bot en `inversiones`.
+#
+# La tabla tiene `user_id uuid not null default auth.uid()`, pero ese default
+# solo se completa cuando el INSERT viaja con el JWT de un usuario logueado.
+# El bot escribe con service_role, donde auth.uid() es NULL, así que tiene que
+# mandarlo explícito o el insert falla.
+#
+# Es el id del usuario de la web, en Supabase -> Authentication -> Users, o:
+#   select id, email from auth.users;
+#
+# Opcional: sin esto todo lo demás funciona y solo se rechazan las compras de
+# inversión, con un mensaje que explica qué configurar.
+SUPABASE_USER_ID: str = (os.getenv("SUPABASE_USER_ID") or "").strip()

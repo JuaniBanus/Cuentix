@@ -17,8 +17,10 @@ create table if not exists public.movimientos (
     -- modelo. Siempre positivo: el signo lo aporta `tipo`.
     monto       numeric(14,2) not null check (monto > 0),
 
+    -- Los tres valores de Moneda (app/models.py). Si se agrega uno nuevo,
+    -- hay que ampliar este check o el insert falla.
     moneda      text          not null default 'ARS'
-                check (moneda in ('ARS', 'USD')),
+                check (moneda in ('ARS', 'USD', 'EUR')),
 
     -- Se guarda normalizada en minúsculas (ver _aplicar_filtros en app/db.py:94:
     -- el filtro compara con eq, así que un 'Super' guardado nunca matchearía).

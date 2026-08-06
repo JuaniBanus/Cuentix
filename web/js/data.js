@@ -70,6 +70,37 @@ function traducirErrorDeDatos(error) {
   return error.message ?? "No pude leer los movimientos.";
 }
 
+/** Trae las tenencias del usuario, de la compra más reciente a la más vieja.
+ *
+ * La policy de RLS filtra por user_id, así que no hace falta —ni serviría—
+ * pasar un filtro de usuario desde acá.
+ */
+export async function traerInversiones() {
+  const filas = [];
+
+  for (let pagina = 0; ; pagina++) {
+    const { data, error } = await sb
+      .from("inversiones")
+      .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra, sector")
+      .order("fecha_compra", { ascending: false })
+      .order("created_at", { ascending: false })
+      .range(pagina * PAGINA, (pagina + 1) * PAGINA - 1);
+
+    if (error) throw new Error(traducirErrorDeDatos(error));
+
+    filas.push(...data);
+    if (data.length < PAGINA) {
+      // numeric llega como string desde PostgREST cuando excede el rango
+      // seguro de float, y como número cuando no: se normaliza acá una vez.
+      return filas.map((f) => ({
+        ...f,
+        cantidad: Number(f.cantidad),
+        precio_compra: Number(f.precio_compra),
+      }));
+    }
+  }
+}
+
 /** Agrupa por moneda: { ARS: [...], USD: [...] }. */
 export function porMoneda(movimientos) {
   const grupos = {};

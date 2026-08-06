@@ -24,6 +24,37 @@
   --alto-tabs: 62px;
 }
 
+/* Tema claro. Solo se redefinen los tokens: todo lo demás los usa, así que no
+   hay una sola regla de componente duplicada.
+
+   Los acentos se oscurecen respecto del tema oscuro porque el violeta claro
+   (#b5abfc) sobre blanco da 1.9:1 de contraste, muy por debajo del 4.5:1 que
+   necesita un texto.
+
+   PENDIENTE: la paleta categórica de format.js (COLORES) fue validada contra
+   la superficie oscura #232532. Sobre superficie clara hay que revalidarla:
+   los tonos siguen distinguiéndose entre sí, pero el contraste contra el fondo
+   cambia y algunos quedan flojos. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --fondo: #f7f7fa;
+    --superficie: #ffffff;
+    --texto: #1b1c26;
+    --tenue: #5a5e70;
+    --tenue-2: #767a8c;
+
+    --acento: #6b5cc4;
+    --acento-claro: #4f42a3;
+    --acento-medio: #7a6cd0;
+    --acento-oscuro: #574a9e;
+    --acento-palido: #3d3280;
+    --acento-profundo: #2f2663;
+
+    --borde: rgba(27, 28, 38, .12);
+    --borde-fuerte: rgba(27, 28, 38, .22);
+  }
+}
+
 * { box-sizing: border-box; }
 
 /* El atributo hidden lo aplica el navegador con `display: none`, y CUALQUIER
@@ -135,11 +166,33 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .boton-icono:hover { color: var(--texto); }
 .boton-icono.es-activo { color: var(--acento-claro); border-color: var(--acento); }
 
+.boton-icono:disabled { opacity: .5; cursor: default; }
+
+/* Variante con texto en vez de ícono ("US$"): dice qué hace sin depender de
+   que alguien adivine un pictograma de intercambio. */
+.boton-texto {
+  font-size: 12px; font-weight: 600; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
 .icono {
   width: 20px; height: 20px;
   fill: none; stroke: currentColor;
   stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
+
+/* Aviso de conversión. Va pegado bajo la cabecera y con el mismo ancho de
+   columna que el resto, para que se lea como parte del encabezado y no como
+   contenido de la pantalla. */
+.aviso-usd {
+  max-width: var(--ancho);
+  margin: 0 auto 2px;
+  padding: 0 18px 6px;
+  font-size: 12px; line-height: 1.4;
+  color: var(--tenue-2);
+}
+.aviso-usd .aviso-destacado { color: var(--tenue); }
+.aviso-usd.es-error { color: #ff9a9a; }
 
 .chips { display: flex; gap: 6px; margin-bottom: 10px; }
 .chip {
@@ -218,6 +271,87 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .movimiento-sub { font-size: 12.5px; color: var(--tenue-2); }
 .movimiento-monto { font-size: 14.5px; font-weight: 500; }
 .movimiento-monto.es-ingreso { color: var(--acento-claro); }
+
+/* ------------------------------------------------------------ Inversiones */
+
+/* Suba y baja NO se distinguen solo por color: la G/P siempre lleva su signo
+   (+/−) escrito, así que quien no distingue verde de rojo la lee igual.
+   Se usan los tokens del tema y no verde/rojo puros, que sobre el fondo
+   oscuro vibran. */
+.es-suba { color: #4fbf9f; }
+.es-baja { color: #ff9a9a; }
+
+@media (prefers-color-scheme: light) {
+  .es-suba { color: #16785e; }
+  .es-baja { color: #b3261e; }
+}
+
+.apunte-tenue { color: var(--tenue-2); }
+.titulo-nota { color: var(--tenue-2); font-weight: 400; }
+
+.nota-precios {
+  padding: 10px 12px;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--r-boton);
+  color: var(--tenue-2);
+  font-size: 12.5px; line-height: 1.5;
+}
+
+.posiciones { display: flex; flex-direction: column; margin-top: 6px; }
+.posicion {
+  display: grid; grid-template-columns: 40px 1fr auto;
+  align-items: center; gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.posicion:last-child { border-bottom: 0; }
+
+.posicion-marca {
+  display: grid; place-items: center;
+  width: 40px; height: 40px;
+  border-radius: var(--r-boton);
+  background: color-mix(in srgb, var(--acento) 16%, transparent);
+  border: 1px solid var(--borde);
+  color: var(--acento-claro);
+  font-size: 11px; font-weight: 600; letter-spacing: -.02em;
+}
+
+.posicion-texto { display: flex; flex-direction: column; min-width: 0; }
+.posicion-titulo { font-size: 14.5px; font-weight: 500; }
+.posicion-sub {
+  font-size: 12.5px; color: var(--tenue-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.posicion-fecha { color: var(--tenue-2); opacity: .8; }
+
+.posicion-cifras {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 1px;
+  text-align: right;
+}
+.posicion-valor { font-size: 14.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.posicion-gp { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.posicion-pct { opacity: .8; }
+.posicion-gp.es-sin-dato {
+  color: var(--tenue-2); font-style: italic;
+  border-bottom: 1px dotted var(--borde-fuerte); cursor: help;
+}
+
+/* Barras de distribución por moneda. */
+.barras { display: flex; flex-direction: column; gap: 10px; }
+.barra-fila {
+  display: grid; grid-template-columns: 42px 1fr auto 36px;
+  align-items: center; gap: 10px;
+}
+.barra-nombre { font-size: 13px; color: var(--tenue); }
+.barra-pista {
+  height: 8px; border-radius: 4px;
+  background: color-mix(in srgb, var(--texto) 10%, transparent);
+  overflow: hidden;
+}
+.barra-relleno { display: block; height: 100%; border-radius: 4px; }
+.barra-monto { font-size: 13px; font-weight: 500; }
+.barra-pct { font-size: 12.5px; color: var(--tenue-2); text-align: right; }
 
 /* ------------------------------------------------------------------- Tabs */
 

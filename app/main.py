@@ -13,8 +13,16 @@ from starlette.concurrency import run_in_threadpool
 
 from app.comandos import respuesta_directa
 from app.config import CHATS_PERMITIDOS, WEBHOOK_SECRET
-from app.db import Total, balance, guardar_movimiento, init_db, totales_por_categoria, totales_por_moneda
-from app.models import Consulta, Intencion, Moneda, Movimiento
+from app.db import (
+    Total,
+    balance,
+    guardar_inversion,
+    guardar_movimiento,
+    init_db,
+    totales_por_categoria,
+    totales_por_moneda,
+)
+from app.models import Consulta, Intencion, Inversion, Moneda, Movimiento, TipoInversion
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
 from app.telegram import (
     TelegramError,
@@ -170,6 +178,9 @@ async def _resolver(interpretacion: Interpretacion) -> str:
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
         return _confirmacion(movimiento)
 
+    if intencion is Intencion.REGISTRAR_INVERSION:
+        return await _resolver_inversion(interpretacion)
+
     if intencion is Intencion.DESCONOCIDA or interpretacion.consulta is None:
         return MSG_NO_ENTENDI
 
@@ -186,9 +197,93 @@ async def _resolver(interpretacion: Interpretacion) -> str:
     return MSG_NO_ENTENDI
 
 
+async def _resolver_inversion(interpretacion: Interpretacion) -> str:
+    """Guarda la compra, o pregunta por lo que falte en vez de inventarlo."""
+    if interpretacion.faltantes:
+        return _pedir_faltantes(interpretacion.faltantes)
+
+    inversion = interpretacion.inversion
+    inversion_id = await run_in_threadpool(guardar_inversion, inversion)
+    logger.info("Inversión %s guardada: %s", inversion_id, inversion)
+    return _confirmacion_inversion(inversion)
+
+
+def _pedir_faltantes(faltantes: tuple[str, ...]) -> str:
+    """Pide los datos que faltan.
+
+    El bot no guarda estado entre mensajes, así que pide la frase completa de
+    nuevo en vez de esperar una respuesta suelta: un "a 25 dólares" aislado
+    llegaría sin nada a lo que engancharse.
+    """
+    pedidos = [ETIQUETA_FALTANTE.get(campo, campo) for campo in faltantes]
+    if len(pedidos) == 1:
+        detalle = pedidos[0]
+    else:
+        detalle = ", ".join(pedidos[:-1]) + f" y {pedidos[-1]}"
+
+    return (
+        f"Me falta un dato para anotar esa compra: {detalle}.\n\n"
+        "Mandámelo de nuevo completo, por ejemplo:\n"
+        "«compré 10 CEDEARs de Apple a US$25»"
+    )
+
+
+def _confirmacion_inversion(inversion: Inversion) -> str:
+    """Ej: '📈 Compra registrada\\n0,5 BTC (Bitcoin) a US$60.000\\nTotal: US$30.000'."""
+    etiqueta = _ETIQUETA_INVERSION[inversion.tipo.value]
+    total = inversion.cantidad * inversion.precio_compra
+    identidad = (
+        f"{inversion.ticker} ({inversion.nombre})" if inversion.ticker else inversion.nombre
+    )
+
+    # En un plazo fijo la "cantidad" es la plata depositada y no hay precio
+    # unitario: mostrarlo daría "$0 por unidad · Total: $0", que no dice nada.
+    if inversion.tipo is TipoInversion.PLAZO_FIJO and not inversion.precio_compra:
+        return (
+            f"📈 Compra registrada\n"
+            f"{etiqueta} · {inversion.nombre}\n"
+            f"Monto: {_formatear_monto(inversion.cantidad, inversion.moneda)} "
+            f"({inversion.fecha_compra:%d/%m})"
+        )
+
+    return (
+        f"📈 Compra registrada\n"
+        f"{_formatear_cantidad(inversion.cantidad)} {identidad}\n"
+        f"{etiqueta} · {_formatear_monto(inversion.precio_compra, inversion.moneda)} por unidad\n"
+        f"Total: {_formatear_monto(total, inversion.moneda)} ({inversion.fecha_compra:%d/%m})"
+    )
+
+
+def _formatear_cantidad(cantidad: Decimal) -> str:
+    """10 -> '10' · 0.5 -> '0,5' · 0.00010000 -> '0,0001' (sin ceros de relleno)."""
+    normalizada = cantidad.normalize()
+    # normalize() pasa los enteros a notación científica (10 -> 1E+1).
+    if normalizada == normalizada.to_integral_value():
+        return f"{int(normalizada):,}".replace(",", ".")
+    return format(normalizada, "f").replace(".", ",")
+
+
 # --------------------------------------------------------------------------
 # Armado de las respuestas
 # --------------------------------------------------------------------------
+
+_ETIQUETA_INVERSION = {
+    "accion": "Acción",
+    "etf": "ETF",
+    "bono": "Bono",
+    "cedear": "CEDEAR",
+    "fci": "FCI",
+    "cripto": "Cripto",
+    "plazo_fijo": "Plazo fijo",
+}
+
+# Nombre técnico -> cómo pedírselo al usuario.
+ETIQUETA_FALTANTE = {
+    "tipo": "qué tipo de activo es (acción, cedear, cripto, bono, fci, plazo fijo)",
+    "nombre": "qué compraste",
+    "cantidad": "cuántas unidades compraste",
+    "precio_compra": "a qué precio por unidad",
+}
 
 # (singular para la confirmación, verbo para los totales, plural para el desglose)
 _ETIQUETA_TIPO = {
@@ -293,9 +388,16 @@ def _plural(cantidad: int) -> str:
     return "1 movimiento" if cantidad == 1 else f"{cantidad} movimientos"
 
 
+# El fallback etiqueta con el código en vez de romper o mentir: una moneda
+# nueva en el enum sin símbolo acá se mostraría bien igual, solo que menos
+# lindo. El ternario anterior rotulaba cualquier cosa que no fuera ARS como
+# "US$", así que los euros salían disfrazados de dólares.
+_SIMBOLO_MONEDA = {Moneda.ARS: "$", Moneda.USD: "US$", Moneda.EUR: "€"}
+
+
 def _formatear_monto(monto: Decimal, moneda: Moneda) -> str:
-    """8500.00 -> '$8.500' | 15340.50 USD -> 'US$15.340,50' (formato argentino)."""
-    simbolo = "$" if moneda is Moneda.ARS else "US$"
+    """8500.00 -> '$8.500' | 15340.50 USD -> 'US$15.340,50' | 200 EUR -> '€200'."""
+    simbolo = _SIMBOLO_MONEDA.get(moneda, f"{moneda.value} ")
     signo = "-" if monto < 0 else ""
     monto = abs(monto)
     if monto == monto.to_integral_value():
