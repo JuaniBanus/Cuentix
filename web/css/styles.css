@@ -909,10 +909,190 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-color: var(--acento);
 }
 
-/* Pantallas grandes: la app sigue siendo una columna angosta, con aire a la
-   derecha, en vez de estirarse a lo ancho. */
-@media (min-width: 720px) {
-  .cabecera, .contenido, .tabs { margin-left: max(24px, calc(50vw - 420px)); margin-right: auto; }
+/* ==========================================================================
+   Pantallas grandes
+   ==========================================================================
+
+   TODO lo que sigue vive adentro de media queries con min-width. Por debajo de
+   768px no se aplica ni una de estas reglas, así que el diseño de teléfono es
+   exactamente el de siempre; ese es el contrato de esta sección y la razón de
+   que no haya nada suelto acá abajo.
+
+   Antes había un bloque en 720px que corría la columna de 480px hacia la
+   izquierda y dejaba el aire a la derecha. Se fue: entre 720 y 767 la columna
+   ahora queda centrada, igual que en 719, en vez de pegada a un costado.
+
+   Dos saltos:
+
+     768px  tablet  — la barra de tabs se va al costado, colapsada a íconos.
+     1024px desktop — la barra se ensancha y muestra el texto de cada sección.
+
+   Por qué al costado y no una barra horizontal arriba: .cabecera ya es una
+   franja horizontal fija con la marca, el período, el dólar y el ojo. Una
+   segunda franja debajo serían dos bandas comiendo alto en un laptop, que es
+   justo lo que escasea. El problema a resolver es el aire de los costados, y
+   el menú lateral lo gasta ahí, no en vertical.
+   ========================================================================== */
+
+@media (min-width: 768px) {
+  :root {
+    --lateral: 72px;        /* ancho de la barra al costado */
+    --ancho-amplio: 1280px; /* techo del contenido: más que esto cansa de leer */
+  }
+
+  /* ------------------------------------------------- Barra de secciones */
+
+  /* De franja fija abajo a columna fija a la izquierda. El grid que ya tenía
+     para repartir las tabs a lo ancho se da vuelta: ahora apila hacia abajo y
+     se agrupa arriba, en vez de estirar cinco botones sobre todo el alto. */
+  .tabs {
+    top: 0; bottom: 0; right: auto;
+    width: var(--lateral); max-width: none;
+    margin: 0;
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    align-content: start;
+    gap: 4px;
+    padding: 16px 10px;
+    border-top: 0;
+    border-right: 1px solid var(--borde);
+  }
+
+  .tab {
+    position: relative;
+    padding: 11px 0;
+    border-radius: var(--r-boton);
+    transition: color .15s, background .15s;
+  }
+  /* En el ancho de tablet solo entran los íconos. El texto no se borra con
+     display:none: se esconde a la vista pero sigue en el DOM, que es lo que
+     lee el lector de pantalla para saber a dónde lleva cada botón. */
+  .tab span {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--texto); background: var(--realce); }
+  /* Acá el color solo no alcanza: en una columna, el ítem activo se reconoce
+     por la pastilla, no por un matiz de gris a teal. */
+  .tab.es-activo { background: var(--acento-suave); }
+
+  /* --------------------------------------------------------- Esqueleto */
+
+  /* El corrimiento va en el contenedor de la app y no en el body, porque el
+     login y la pantalla de carga viven afuera y no tienen barra lateral: con
+     el padding en el body quedarían descentrados sin motivo. */
+  #vista-app { padding-left: var(--lateral); }
+
+  /* Con el padding puesto arriba, el `margin: 0 auto` que ya tenían centra en
+     el espacio que queda a la derecha de la barra, sin cuentas con vw. */
+  .cabecera { max-width: var(--ancho-amplio); }
+
+  .contenido {
+    max-width: var(--ancho-amplio);
+    /* Ya no hay barra abajo de la que escaparle. */
+    padding-bottom: 40px;
+    /* De pila vertical a grilla de dos columnas. minmax(0,1fr) y no 1fr: sin
+       eso, una tabla o un texto largo ensancha su columna y descuadra la otra.
+       align-items:start evita que una tarjeta corta se estire hasta igualar a
+       la de al lado y quede medio vacía. */
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  /* Por defecto cada sección sigue ocupando el ancho completo: una pantalla a
+     la que todavía no se le diseñó el reacomodo se ve como hoy, apilada, nada
+     más que más ancha. Cada pantalla se va soltando a dos columnas de a una,
+     abajo. */
+  .contenido > * { grid-column: 1 / -1; }
+
+  /* Las vistas de detalle (una categoría abierta, el formulario de un
+     objetivo, el histórico de un ticker) vuelven a columna única y angosta: un
+     formulario repartido en dos columnas se completa peor, y son pantallas de
+     una sola tarea. Se reconocen por el botón de volver, que solo existe ahí. */
+  .contenido:has(.boton-volver) {
+    grid-template-columns: minmax(0, 680px);
+    justify-content: center;
+  }
+
+  /* --------------------------------------------------------------- Inicio */
+
+  /*   ┌──────────────┬──────────────┐
+       │ Balance      │ Ingr.│Ahorr. │   el número grande y sus dos desgloses,
+       ├──────────────┴──────────────┤   a la misma altura del ojo
+       │ Dona   ·   leyenda al lado  │   lo único que gana de veras con el ancho
+       ├──────────────┬──────────────┤
+       │ Salud        │ Recientes    │
+       └──────────────┴──────────────┘
+
+     La dona cruza las dos columnas en vez de quedarse en una: es el único
+     bloque donde "más ancho" significa "se entiende mejor", porque la leyenda
+     puede pararse al lado del gráfico en lugar de debajo. Metida en media
+     columna no entraría y habría que dejarla apilada, que es lo de hoy. */
+
+  /* La fila va escrita en todos, no solo la columna: el orden del DOM es
+     balance, salud, dona, mini-tarjetas, recientes, así que dejar que la fila
+     se resuelva sola mete a salud arriba de la dona y abre dos huecos. */
+  [data-pantalla="inicio"] > .bloque:first-child { grid-column: 1; grid-row: 1; }
+  [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 1; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 2; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 3; }
+  [data-pantalla="inicio"] > .bloque:last-child { grid-column: 2; grid-row: 3; }
+
+  /* La dona y su leyenda son hermanas dentro de #dona, así que alcanza con
+     convertir ese contenedor en dos columnas. `auto` para el gráfico y no un
+     ancho fijo: así la figura pide lo que necesita y la leyenda se queda con
+     todo el resto. */
+  /* La leyenda lleva techo y el par va centrado: sin el techo, en un monitor
+     ancho el nombre queda contra el borde izquierdo y el monto contra el
+     derecho, con medio metro de nada en el medio, y hay que barrer la fila con
+     la vista para saber cuánto salió cada cosa. */
+  [data-pantalla="inicio"] #dona {
+    display: grid;
+    grid-template-columns: auto minmax(0, 460px);
+    justify-content: center;
+    align-items: center;
+    gap: 8px 40px;
+  }
+  [data-pantalla="inicio"] .dona-figura { max-width: 280px; }
+  /* El margen de arriba separaba la leyenda de la dona cuando iba debajo. Al
+     costado ya no separa nada: la descuelga. */
+  [data-pantalla="inicio"] .leyenda { margin-top: 0; }
+
+  /* El medidor acompaña: en una columna de casi 600px, 200px de gauge quedan
+     perdidos en el medio de la tarjeta. */
+  [data-pantalla="inicio"] .gauge { max-width: 240px; }
+
+  /* En el teléfono el nombre se queda con el sobrante y la barra mide 72px
+     fijos. En una columna ancha ese reparto deja un vacío entre el nombre y la
+     barra: acá el nombre pide solo lo suyo y el sobrante se lo lleva la barra,
+     que es lo único que gana algo con ser más larga. */
+  [data-pantalla="inicio"] .salud-fila {
+    grid-template-columns: max-content minmax(72px, 1fr) auto auto;
+  }
+}
+
+/* ------------------------------------------------------------- Desktop */
+
+@media (min-width: 1024px) {
+  :root { --lateral: 232px; }
+
+  /* Entra el texto al lado del ícono: el ícono deja de ser una adivinanza. */
+  .tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+  }
+  .tab span {
+    position: static;
+    width: auto; height: auto;
+    clip-path: none;
+    font-size: 13.5px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

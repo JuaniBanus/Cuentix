@@ -72,6 +72,11 @@ export function pintar() {
 
   const actual = TABS.find((t) => t.id === estado.tab) ?? TABS[0];
 
+  // Marca de qué pantalla se está mostrando. No la usa el JS: es el gancho del
+  // que cuelgan los reacomodos de dos columnas en pantalla grande, que si no no
+  // tendrían cómo distinguir Inicio de Gastos.
+  contenido.dataset.pantalla = actual.id;
+
   if (estado.error && actual.datos) {
     renderAviso(contenido, {
       mensaje: estado.error.message,
