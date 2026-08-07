@@ -10,18 +10,36 @@
 <body>
 
 <!-- Banco de pruebas de estilos con datos inventados: sirve para mirar las
-     pantallas sin loguearse. Los íconos viven en el sprite de index.html, así
-     que acá salen vacíos a propósito. -->
+     pantallas sin loguearse.
 
+     Los íconos de las tabs se repiten acá abajo en chiquito. Es duplicación a
+     propósito: en pantalla grande la barra se va al costado y se queda solo
+     con los íconos, así que un banco sin ellos mostraría una franja vacía y no
+     serviría para revisar justo el layout que hay que revisar. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-casa"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></g>
+    <g id="i-gastos"><path d="M3 12h18M3 12l4-4M3 12l4 4"/><circle cx="17" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></g>
+    <g id="i-ahorro"><path d="M4 9h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/><circle cx="12" cy="14" r="1.6"/></g>
+    <g id="i-inversion"><path d="M4 18l5-5 3 3 7-8"/><path d="M15 8h4v4"/></g>
+    <g id="i-usuario"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></g>
+  </defs>
+</svg>
+
+<!-- El mismo envoltorio que index.html. No es decorativo: en pantalla grande es
+     el que se corre para dejarle lugar a la barra lateral, así que sin él el
+     banco mostraría el contenido por debajo de la barra. -->
+<div id="vista-app">
 <header class="cabecera"><p class="marca">Cuentix</p></header>
 <main id="contenido" class="contenido"></main>
 <nav class="tabs">
-  <button class="tab es-activo" data-tab="inicio"><span>Inicio</span></button>
-  <button class="tab" data-tab="gastos"><span>Gastos</span></button>
-  <button class="tab" data-tab="ahorros"><span>Ahorros</span></button>
-  <button class="tab" data-tab="inversiones"><span>Inversiones</span></button>
-  <button class="tab" data-tab="usuario"><span>Usuario</span></button>
+  <button class="tab es-activo" data-tab="inicio"><svg viewBox="0 0 24 24" class="icono"><use href="#i-casa"></use></svg><span>Inicio</span></button>
+  <button class="tab" data-tab="gastos"><svg viewBox="0 0 24 24" class="icono"><use href="#i-gastos"></use></svg><span>Gastos</span></button>
+  <button class="tab" data-tab="ahorros"><svg viewBox="0 0 24 24" class="icono"><use href="#i-ahorro"></use></svg><span>Ahorros</span></button>
+  <button class="tab" data-tab="inversiones"><svg viewBox="0 0 24 24" class="icono"><use href="#i-inversion"></use></svg><span>Inversiones</span></button>
+  <button class="tab" data-tab="usuario"><svg viewBox="0 0 24 24" class="icono"><use href="#i-usuario"></use></svg><span>Usuario</span></button>
 </nav>
+</div>
 <script type="module">
 import { renderInicio } from "./js/screens/inicio.js";
 import { renderUsuario } from "./js/screens/usuario.js";
@@ -94,11 +112,18 @@ const pantallas = {
   usuario: renderUsuario,
 };
 
-let tab = "inicio";
+// La pantalla se puede fijar por URL (?tab=gastos): así se pueden comparar
+// anchos sin tener que ir clickeando la barra en cada captura.
+let tab = new URLSearchParams(location.search).get("tab") ?? "inicio";
+if (!pantallas[tab]) tab = "inicio";
 let categoriaAbierta = null;
 
 // El mismo contexto que arma el router en la app de verdad.
 function pintar() {
+  // Lo mismo que hace router.js: es lo que el CSS usa para saber qué layout
+  // corresponde en pantalla grande.
+  contenido.dataset.pantalla = tab;
+
   pantallas[tab](contenido, {
     movimientos,
     movimientosPrevios: previos,
@@ -122,6 +147,7 @@ function pintar() {
 }
 
 for (const boton of document.querySelectorAll(".tab")) {
+  boton.classList.toggle("es-activo", boton.dataset.tab === tab);
   boton.addEventListener("click", () => {
     for (const otro of document.querySelectorAll(".tab")) {
       otro.classList.toggle("es-activo", otro === boton);
