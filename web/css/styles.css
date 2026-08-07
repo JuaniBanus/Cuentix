@@ -4,7 +4,7 @@
  * variable. Cambiar de tema es cambiar este set, no repasar la hoja entera.
  *
  * Los tokens son semánticos (qué papel cumple el color), no descriptivos: por
- * eso --acento-tinta es un violeta claro en oscuro y uno oscuro en claro. Si se
+ * eso --acento-tinta es un teal claro en oscuro y uno oscuro en claro. Si se
  * llamara --acento-claro, en tema claro diría exactamente lo contrario de lo
  * que hace.
  */
@@ -23,42 +23,54 @@
 :root, :root[data-tema="oscuro"] {
   color-scheme: dark;
 
-  --fondo: #161826;
-  --superficie: #232532;
+  /* Los grises no son neutros: llevan la misma gota de teal que el logo. Un
+     gris puro al lado del acento se ve sucio, tirando a violáceo. */
+  --fondo: #0b1f23;
+  --superficie: #102a2e;
 
-  --texto: #e9e9ed;
-  --tenue: #9397ab;
+  --texto: #e9efee;
+  --tenue: #8e9fa1;
   /* Antes #75798c, que sobre la tarjeta daba 3.5:1 y dejaba los subtítulos de
-     12px por debajo del mínimo legible. Este llega a 4.7:1. */
-  --tenue-2: #8a8ea3;
+     12px por debajo del mínimo legible. Este llega a 4.9:1. */
+  --tenue-2: #86979a;
 
-  --acento: #9184d9;          /* la marca, igual en los dos temas */
-  --acento-tinta: #b5abfc;    /* acento cuando es texto o ícono */
-  --acento-suave: rgba(145, 132, 217, .14);
+  /* El teal de marca. Es el mismo en los dos temas porque se usa de borde, y
+     para eso tiene que pasar 3:1 contra la tarjeta oscura Y contra la blanca:
+     4.4:1 y 3.5:1. Los tonos más lindos del logo fallan de un lado o del otro
+     —el teal profundo se hunde en el oscuro, la menta se lava en el blanco. */
+  --acento: #1a97ad;
+  --acento-tinta: #6fd2e1;    /* acento cuando es texto o ícono */
+  --acento-suave: rgba(26, 151, 173, .18);
 
-  --borde: rgba(233, 233, 237, .12);
-  --borde-fuerte: rgba(233, 233, 237, .2);
+  --borde: rgba(233, 239, 238, .12);
+  --borde-fuerte: rgba(233, 239, 238, .2);
   /* Los campos del login llevan borde propio: es lo único que dice dónde
      empieza y termina el recuadro donde se escribe. */
-  --borde-campo: rgba(233, 233, 237, .3);
-  --realce: rgba(233, 233, 237, .05);
+  --borde-campo: rgba(233, 239, 238, .3);
+  --realce: rgba(233, 239, 238, .05);
 
   --error: #ff9a9a;
   /* Ganancia y pérdida de las inversiones. No se usa --error para la baja:
-     una posición en rojo es un dato normal de la cartera, no una falla. */
+     una posición en rojo es un dato normal de la cartera, no una falla.
+     La suba se queda en verde y no toma la menta del logo: a 165° de tono
+     serían el mismo color, y "en ganancia" dejaría de leerse como un estado
+     para confundirse con la marca. El acento se fue al teal, a 188°. */
   --suba: #4fbf9f;
   --baja: #ff9a9a;
   --sombra: none;
   --sombra-panel: 0 12px 32px rgba(0, 0, 0, .45);
 
-  /* Dona: seis tonos a la misma luminosidad, validados contra la tarjeta. */
-  --cat-1: #9184d9;
-  --cat-2: #05a085;
+  /* Dona: seis tonos a la misma luminosidad, validados contra la tarjeta.
+     El primero es el de marca. Al pasar de violeta a cian quedó a 14° del azul
+     que había en --cat-5, o sea dos porciones vecinas indistinguibles: por eso
+     el azul se corrió a 216° y el violeta, que quedó libre, pasó a --cat-2. */
+  --cat-1: #12a5bd;
+  --cat-2: #9184d9;
   --cat-3: #c27405;
   --cat-4: #d05a8e;
-  --cat-5: #0290e1;
+  --cat-5: #3f7fe0;
   --cat-6: #689b1e;
-  --cat-otros: #75798c;
+  --cat-otros: #78888a;
 }
 
 /* -------------------------------------------------------- Tema claro */
@@ -68,25 +80,25 @@
 :root[data-tema="claro"] {
   color-scheme: light;
 
-  --fondo: #f2f2f7;           /* gris con una gota de violeta, no blanco puro */
+  --fondo: #eff3f3;           /* gris con una gota de teal, no blanco puro */
   --superficie: #ffffff;
 
-  --texto: #1c1d29;
-  --tenue: #5b5e72;
-  --tenue-2: #6b6e83;
+  --texto: #1c2b2d;
+  --tenue: #4f6467;
+  --tenue-2: #5b7072;
 
-  --acento: #9184d9;
-  /* El violeta de marca sobre blanco da 3.2:1: alcanza para un borde, no para
-     una cifra. Como texto va este, que llega a 6:1. */
-  --acento-tinta: #5b4bb5;
-  --acento-suave: rgba(145, 132, 217, .16);
+  --acento: #1a97ad;
+  /* El teal de marca sobre blanco da 3.5:1: alcanza para un borde, no para una
+     cifra. Como texto va el teal profundo del logo, que llega a 6:1. */
+  --acento-tinta: #0d6d7e;
+  --acento-suave: rgba(26, 151, 173, .16);
 
-  --borde: rgba(28, 29, 41, .12);
-  --borde-fuerte: rgba(28, 29, 41, .34);
+  --borde: rgba(28, 43, 45, .12);
+  --borde-fuerte: rgba(28, 43, 45, .34);
   /* Más marcado que en oscuro: un campo blanco sobre un fondo casi blanco no se
      distingue por el relleno, solo por el borde. Este llega a 3.4:1. */
-  --borde-campo: rgba(28, 29, 41, .55);
-  --realce: rgba(28, 29, 41, .05);
+  --borde-campo: rgba(28, 43, 45, .55);
+  --realce: rgba(28, 43, 45, .05);
 
   --error: #b3261e;
   /* Los mismos dos tonos rebajados hasta pasar 4.5:1 sobre la tarjeta blanca:
@@ -95,16 +107,16 @@
   --baja: #b3261e;
   /* Tarjeta blanca sobre fondo casi blanco: sin una sombra mínima el borde de
      la tarjeta desaparece. */
-  --sombra: 0 1px 2px rgba(28, 29, 41, .06);
-  --sombra-panel: 0 12px 32px rgba(28, 29, 41, .16);
+  --sombra: 0 1px 2px rgba(28, 43, 45, .06);
+  --sombra-panel: 0 12px 32px rgba(28, 43, 45, .16);
 
-  --cat-1: #6f5fc9;
-  --cat-2: #008970;
+  --cat-1: #0b7c8f;
+  --cat-2: #6f5fc9;
   --cat-3: #8f5a00;
   --cat-4: #b03f76;
-  --cat-5: #0071b8;
+  --cat-5: #2f5fc0;
   --cat-6: #4d7a12;
-  --cat-otros: #6f7285;
+  --cat-otros: #6a7b7d;
 }
 
 * { box-sizing: border-box; }

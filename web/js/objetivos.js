@@ -7,7 +7,7 @@ import { hoyISO } from "./format.js";
 export const PRIORIDADES = ["alta", "media", "baja"];
 
 // Los colores se guardan como nombre de token y no como hex: así el objetivo
-// se ve bien en tema claro y en oscuro. Un #9184d9 fijo quedaría lavado sobre
+// se ve bien en tema claro y en oscuro. Un #12a5bd fijo quedaría lavado sobre
 // blanco.
 export const COLORES = ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6"];
 
