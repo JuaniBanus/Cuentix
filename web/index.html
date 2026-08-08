@@ -28,9 +28,13 @@
 
 <!-- PWA. El manifest es lo que habilita "Instalar app" en el navegador. -->
 <link rel="manifest" href="manifest.json">
-<!-- iOS ignora el manifest para el ícono de la pantalla de inicio. -->
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="icon" href="icons/icono-192.png" type="image/png">
+<!-- iOS ignora el manifest para el ícono de la pantalla de inicio.
+     El ?v= tiene que subir cada vez que se cambia un ícono, y en los mismos
+     números que el manifest: los PNG se sirven con caché de 7 días y el sistema
+     copia el ícono al launcher al instalar, sin volver a mirarlo nunca. Cambiar
+     el dibujo sin cambiar la URL deja el logo viejo pegado en los teléfonos. -->
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
+<link rel="icon" href="icons/icono-192.png?v=2" type="image/png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Cuentix">
 </head>
