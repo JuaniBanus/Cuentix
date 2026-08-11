@@ -13,6 +13,7 @@
 
 import { renderAviso } from "../aviso.js";
 import { renderDona } from "../donut.js";
+import { esqueletoInversiones, esqueletoPrecio } from "../esqueleto.js";
 import { esc, fechaCorta, monto, montosOcultos, tasaAUSD } from "../format.js";
 import { mercadoDe, ultimoConocido, vaPorElProxy } from "../mercado.js";
 import { tienePrecioDeMercado } from "../precios.js";
@@ -201,7 +202,7 @@ function bloqueHistorico(historico) {
   const { ticker, cargando, error, puntos, moneda } = historico;
 
   let cuerpo;
-  if (cargando) cuerpo = `<p class="vacio">Buscando el histórico de ${esc(ticker)}…</p>`;
+  if (cargando) cuerpo = esqueletoPrecio();
   else if (error) cuerpo = `<p class="insights-error" role="alert">${esc(error)}</p>`;
   else cuerpo = `<div id="grafico-precio"></div>`;
 
@@ -251,7 +252,7 @@ export function renderInversiones(contenedor, ctx) {
   // null = todavía no llegó la consulta. [] = llegó y no hay tenencias. Sin la
   // distinción, la primera pintada diría "no cargaste nada" antes de saberlo.
   if (!inversiones) {
-    contenedor.innerHTML = `<p class="vacio">Cargando tus inversiones…</p>`;
+    contenedor.innerHTML = esqueletoInversiones();
     return;
   }
 
@@ -320,7 +321,7 @@ export function renderInversiones(contenedor, ctx) {
         <p class="etiqueta">
           Valor del portafolio${monedas.length > 1 ? ` · ${esc(r.moneda)}` : ""}
         </p>
-        <p class="cifra-heroe">${monto(r.valorActual, r.moneda)}</p>
+        <p class="cifra-heroe" data-contar="${r.valorActual}" data-moneda="${esc(r.moneda)}">${monto(r.valorActual, r.moneda)}</p>
         ${
           r.cuantasValoradas
             ? `<p class="apunte ${r.ganancia >= 0 ? "es-suba" : "es-baja"}">
