@@ -9,6 +9,8 @@
 // escrito en el centro y la banda en palabras abajo. Un score que solo se
 // distinguiera por el color no lo podría leer alguien con daltonismo.
 
+import { enElProximoCuadro, hayQueAnimar } from "./animar.js";
+
 const RADIO = 70;
 const GROSOR = 12;
 // Ancho del viewBox: el radio a cada lado más el grosor del trazo, que se
@@ -36,6 +38,13 @@ export function renderGauge(contenedor, { score, banda, clase, oculto = false })
   const proporcion = Math.max(0, Math.min(100, score)) / 100;
   const semicirculo = `M ${GROSOR / 2} ${CY} A ${RADIO} ${RADIO} 0 0 1 ${ANCHO - GROSOR / 2} ${CY}`;
 
+  // El arco nace vacío y el valor entra un cuadro después: la transición del CSS
+  // necesita un punto de partida distinto del de llegada, y un atributo escrito
+  // de una sola vez no se lo da. La aguja barriendo la escala es, además, lo que
+  // hace legible que esto es una posición en un rango y no un porcentaje.
+  const anima = hayQueAnimar();
+  const arcoInicial = anima ? 0 : proporcion * ARCO;
+
   contenedor.innerHTML = `
     <div class="gauge">
       <svg viewBox="0 0 ${ANCHO} ${ALTO}" class="gauge-svg" role="img"
@@ -45,7 +54,7 @@ export function renderGauge(contenedor, { score, banda, clase, oculto = false })
         ${oculto ? "" : `
           <path d="${semicirculo}" class="gauge-relleno ${clase}"
                 fill="none" stroke-width="${GROSOR}" stroke-linecap="round"
-                stroke-dasharray="${proporcion * ARCO} ${ARCO}"/>`}
+                stroke-dasharray="${arcoInicial} ${ARCO}"/>`}
       </svg>
       <div class="gauge-centro">
         <span class="gauge-numero ${clase}">${oculto ? "••" : score}</span>
@@ -53,4 +62,32 @@ export function renderGauge(contenedor, { score, banda, clase, oculto = false })
       </div>
     </div>
     <p class="gauge-banda ${clase}">${oculto ? "" : banda}</p>`;
+
+  if (!anima || oculto) return;
+
+  const arco = contenedor.querySelector(".gauge-relleno");
+  const numero = contenedor.querySelector(".gauge-numero");
+
+  enElProximoCuadro(() => {
+    arco.setAttribute("stroke-dasharray", `${proporcion * ARCO} ${ARCO}`);
+  });
+
+  // El número acompaña al arco. Va con su propio contador y no con contarHasta()
+  // porque no es plata: no lleva símbolo ni separador de miles, y pasarlo por
+  // monto() lo escribiría como "$73".
+  contarEntero(numero, score, 900);
+}
+
+/** Cuenta un entero pelado, al ritmo del arco que lo acompaña. */
+function contarEntero(nodo, valor, duracion) {
+  const arranque = performance.now();
+  nodo.textContent = String(valor);
+
+  function cuadro(ahora) {
+    const avance = Math.min((ahora - arranque) / duracion, 1);
+    const suave = 1 - Math.pow(1 - avance, 3);
+    nodo.textContent = String(Math.round(valor * suave));
+    if (avance < 1) requestAnimationFrame(cuadro);
+  }
+  requestAnimationFrame(cuadro);
 }

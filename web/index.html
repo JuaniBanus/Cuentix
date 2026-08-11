@@ -110,9 +110,14 @@
       <button id="btn-ojo" class="boton-icono" aria-pressed="false" aria-label="Ocultar montos">
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-ojo"></use></svg>
       </button>
-    </div>
 
-    <div id="panel-periodo" class="panel" hidden></div>
+      <!-- El panel vive ADENTRO del grupo de acciones, no suelto en el
+           encabezado. En pantalla grande el grupo entero se muda al pie de la
+           barra lateral, y desde acá adentro el panel se muda con él; colgado
+           del encabezado se quedaría arriba a la derecha mientras su botón se
+           fue abajo a la izquierda. -->
+      <div id="panel-periodo" class="panel" hidden></div>
+    </div>
   </header>
 
   <main id="contenido" class="contenido"></main>

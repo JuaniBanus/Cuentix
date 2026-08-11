@@ -4,6 +4,8 @@
 // y también la pantalla que se pinta. Agregar una sección es agregar una línea,
 // no tocar el HTML y el JS por separado y esperar que queden sincronizados.
 
+import { animarCifras, empezarPintado, hayQueAnimar, terminarPintado } from "./animar.js";
+import { marcarActiva, montarBarra } from "./barraSecciones.js";
 import { renderAviso } from "./aviso.js";
 import { estado } from "./estado.js";
 import { cotizacionActual } from "./format.js";
@@ -23,7 +25,10 @@ export const TABS = [
   // Sin `datos`: la cartera tiene su propia consulta y no sale de los
   // movimientos del período, así que un fallo de esos no la deja sin mostrar.
   { id: "inversiones", nombre: "Inversiones", icono: "i-inversion", render: renderInversiones },
-  { id: "usuario", nombre: "Usuario", icono: "i-usuario", render: renderUsuario },
+  // `aparte` la saca de la fila del medio y la manda al extremo derecho de la
+  // barra, junto al ojo, reducida al ícono. No es una vista de datos como las
+  // otras cuatro: es la cuenta.
+  { id: "usuario", nombre: "Usuario", icono: "i-usuario", render: renderUsuario, aparte: true },
 ];
 
 let nav;
@@ -33,18 +38,7 @@ let acciones = {};
 /** @param {{nav: HTMLElement, contenido: HTMLElement, acciones: object}} opciones */
 export function montarNavegacion(opciones) {
   ({ nav, contenido, acciones } = opciones);
-
-  nav.innerHTML = TABS.map(
-    (t) => `
-      <button class="tab" data-tab="${t.id}" aria-current="false">
-        <svg viewBox="0 0 24 24" class="icono"><use href="#${t.icono}"></use></svg>
-        <span>${t.nombre}</span>
-      </button>`
-  ).join("");
-
-  for (const boton of nav.querySelectorAll(".tab")) {
-    boton.addEventListener("click", () => irA(boton.dataset.tab));
-  }
+  montarBarra(nav, TABS, irA);
 }
 
 export function irA(tab) {
@@ -59,16 +53,23 @@ export function irA(tab) {
   // Cambiar de sección arranca arriba: si venías scrolleado en Inicio, la
   // pantalla nueva empezaría por la mitad.
   window.scrollTo({ top: 0 });
-  pintar();
+  pintar(true);
 }
 
-/** Redibuja la barra y la pantalla activa con el estado de ahora. */
-export function pintar() {
-  for (const boton of nav.querySelectorAll(".tab")) {
-    const activo = boton.dataset.tab === estado.tab;
-    boton.classList.toggle("es-activo", activo);
-    boton.setAttribute("aria-current", activo ? "page" : "false");
-  }
+/**
+ * Redibuja la barra y la pantalla activa con el estado de ahora.
+ *
+ * @param {boolean} [conEntrada] true cuando el repintado es una navegación: se
+ *   cambió de sección, se abrió una categoría, se entró a un objetivo. En esos
+ *   casos la pantalla entra escalonada y los gráficos se dibujan solos.
+ *
+ *   Va en false —el valor por omisión— para todo lo demás: tocar el ojo, cambiar
+ *   de moneda, la cotización que llega tarde. Ahí la persona está mirando un
+ *   dato concreto y volver a animarlo se lo esconde medio segundo justo cuando
+ *   lo está leyendo.
+ */
+export function pintar(conEntrada = false) {
+  marcarActiva(nav, estado.tab);
 
   const actual = TABS.find((t) => t.id === estado.tab) ?? TABS[0];
 
@@ -76,6 +77,12 @@ export function pintar() {
   // que cuelgan los reacomodos de dos columnas en pantalla grande, que si no no
   // tendrían cómo distinguir Inicio de Gastos.
   contenido.dataset.pantalla = actual.id;
+
+  // La clase tiene que estar puesta ANTES de que se inserten las tarjetas: una
+  // animación de entrada corre cuando el elemento aparece, no cuando la clase
+  // llega después. Y `toggle` la saca sola en los repintados que no son
+  // navegación, así que no hace falta limpiarla con un temporizador.
+  contenido.classList.toggle("es-nueva", conEntrada);
 
   if (estado.error && actual.datos) {
     renderAviso(contenido, {
@@ -85,6 +92,12 @@ export function pintar() {
     });
     return;
   }
+
+  // Se avisa antes de pintar y se baja al terminar. Los gráficos lo consultan
+  // mientras se dibujan —todo el pintado es sincrónico—, así que cada uno sabe
+  // si le toca animarse sin que haya que pasarle un parámetro a través de las
+  // cinco pantallas.
+  empezarPintado(conEntrada);
 
   // Todas las pantallas reciben el mismo contexto, así ninguna necesita
   // importar el estado ni saber cómo se recarga.
@@ -127,17 +140,19 @@ export function pintar() {
       estado.categoriaAbierta = null;
       pintar();
     },
+    // Abrir y cerrar el detalle de una categoría cambia la pantalla entera, así
+    // que cuenta como navegación: entra escalonada, igual que cambiar de tab.
     setCategoria: (categoria) => {
       estado.categoriaAbierta = categoria;
       window.scrollTo({ top: 0 });
-      pintar();
+      pintar(true);
     },
     abrirObjetivo: (cual) => {
       estado.vistaObjetivo = cual;
       estado.errorObjetivo = null;
       estado.confirmandoBorrado = false;
       window.scrollTo({ top: 0 });
-      pintar();
+      pintar(true);
     },
     pedirBorrado: (si) => {
       estado.confirmandoBorrado = si;
@@ -147,4 +162,8 @@ export function pintar() {
     borrarObjetivo: acciones.borrarObjetivo,
     onSalir: acciones.onSalir,
   });
+
+  // Va después del render porque necesita las cifras ya en el DOM.
+  if (hayQueAnimar()) animarCifras(contenido);
+  terminarPintado();
 }

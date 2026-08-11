@@ -15,7 +15,11 @@
      Los íconos de las tabs se repiten acá abajo en chiquito. Es duplicación a
      propósito: en pantalla grande la barra se va al costado y se queda solo
      con los íconos, así que un banco sin ellos mostraría una franja vacía y no
-     serviría para revisar justo el layout que hay que revisar. -->
+     serviría para revisar justo el layout que hay que revisar.
+
+     Los otros cuatro son los que usan las pantallas por dentro: el "+" de
+     objetivo nuevo, el "volver" de las vistas de detalle, la basura del
+     formulario y la salida de Usuario. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <g id="i-casa"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></g>
@@ -23,22 +27,39 @@
     <g id="i-ahorro"><path d="M4 9h16v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 9V6a4 4 0 0 1 8 0v3"/><circle cx="12" cy="14" r="1.6"/></g>
     <g id="i-inversion"><path d="M4 18l5-5 3 3 7-8"/><path d="M15 8h4v4"/></g>
     <g id="i-usuario"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></g>
+    <g id="i-izquierda"><path d="M14.5 6.5 9 12l5.5 5.5"/></g>
+    <g id="i-mas"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-basura"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12"/><path d="M10 11v6M14 11v6"/></g>
+    <g id="i-salir"><path d="M15 4h3a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-3"/><path d="M10 8l-4 4 4 4M6 12h9"/></g>
+    <g id="i-calendario"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3.5v3M16 3.5v3"/></g>
+    <g id="i-ojo"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></g>
   </defs>
 </svg>
 
 <!-- El mismo envoltorio que index.html. No es decorativo: en pantalla grande es
      el que se corre para dejarle lugar a la barra lateral, así que sin él el
      banco mostraría el contenido por debajo de la barra. -->
+<!-- El encabezado con sus controles, igual que en index.html. No es decoración:
+     en pantalla grande el grupo entero se muda al pie de la barra lateral, así
+     que sin él acá el banco no serviría para revisar el menú, que es la mitad
+     de lo que hay que revisar. Los botones no hacen nada; están por la forma. -->
 <div id="vista-app">
-<header class="cabecera"><p class="marca">Cuentix</p></header>
+<header class="cabecera">
+  <p class="marca">Cuentix</p>
+  <div class="cabecera-acciones">
+    <button id="btn-periodo" class="boton-periodo" aria-expanded="false">
+      <svg viewBox="0 0 24 24" class="icono"><use href="#i-calendario"></use></svg>
+      <span>agosto</span>
+    </button>
+    <button class="boton-icono es-texto" aria-pressed="false">US$</button>
+    <button class="boton-icono" aria-label="Ocultar montos">
+      <svg viewBox="0 0 24 24" class="icono"><use href="#i-ojo"></use></svg>
+    </button>
+    <div id="panel-periodo" class="panel" hidden></div>
+  </div>
+</header>
 <main id="contenido" class="contenido"></main>
-<nav class="tabs">
-  <button class="tab es-activo" data-tab="inicio"><svg viewBox="0 0 24 24" class="icono"><use href="#i-casa"></use></svg><span>Inicio</span></button>
-  <button class="tab" data-tab="gastos"><svg viewBox="0 0 24 24" class="icono"><use href="#i-gastos"></use></svg><span>Gastos</span></button>
-  <button class="tab" data-tab="ahorros"><svg viewBox="0 0 24 24" class="icono"><use href="#i-ahorro"></use></svg><span>Ahorros</span></button>
-  <button class="tab" data-tab="inversiones"><svg viewBox="0 0 24 24" class="icono"><use href="#i-inversion"></use></svg><span>Inversiones</span></button>
-  <button class="tab" data-tab="usuario"><svg viewBox="0 0 24 24" class="icono"><use href="#i-usuario"></use></svg><span>Usuario</span></button>
-</nav>
+<nav class="tabs" aria-label="Secciones"></nav>
 </div>
 <script type="module">
 import { renderInicio } from "./js/screens/inicio.js";
@@ -46,8 +67,21 @@ import { renderUsuario } from "./js/screens/usuario.js";
 import { renderGastos } from "./js/screens/gastos.js";
 import { renderAhorros } from "./js/screens/ahorros.js";
 import { renderInversiones } from "./js/screens/inversiones.js";
+import { animarCifras, empezarPintado, terminarPintado } from "./js/animar.js";
+import { marcarActiva, montarBarra } from "./js/barraSecciones.js";
 import { mes } from "./js/periodo.js";
 import { fijarCotizacion } from "./js/format.js";
+
+// Las mismas cinco secciones que TABS en router.js, sin las funciones de pintado
+// ni las banderas de datos: acá solo se necesita el nombre y el ícono. Importar
+// TABS arrastraría el router entero y con él el estado de la app de verdad.
+const TABS_PREVIEW = [
+  { id: "inicio", nombre: "Inicio", icono: "i-casa" },
+  { id: "gastos", nombre: "Gastos", icono: "i-gastos" },
+  { id: "ahorros", nombre: "Ahorros", icono: "i-ahorro" },
+  { id: "inversiones", nombre: "Inversiones", icono: "i-inversion" },
+  { id: "usuario", nombre: "Usuario", icono: "i-usuario", aparte: true },
+];
 
 // En la app las fija app.js con lo que devuelve cotizaciones.js. Sin esto, la
 // distribución no se dibuja: sin una moneda común, un reparto porcentual entre
@@ -95,12 +129,25 @@ const previos = [
   {id:16, fecha:"2026-07-20", tipo:"gasto", monto:9500,  moneda:"ARS", categoria:"comida",       descripcion:"delivery"},
 ];
 
-// Ahorros mira toda la historia, no solo el período.
+// Ahorros mira toda la historia, no solo el período. Dos de estos van imputados
+// a un objetivo: sin `objetivo_id` las barras de progreso quedarían todas en
+// cero y no se vería el formato real de la tarjeta.
 const historialDeAhorros = [
   {id:29, fecha:"2026-08-02", tipo:"ahorro", monto:50000, moneda:"ARS", categoria:"plazo fijo", descripcion:"pf", cuenta:"banco"},
   {id:28, fecha:"2026-06-05", tipo:"ahorro", monto:40000, moneda:"ARS", categoria:"plazo fijo", descripcion:"pf", cuenta:"banco"},
-  {id:27, fecha:"2026-04-11", tipo:"ahorro", monto:25000, moneda:"ARS", categoria:"para el viaje", descripcion:"viaje", cuenta:"efectivo"},
-  {id:26, fecha:"2026-02-20", tipo:"ahorro", monto:18000, moneda:"ARS", categoria:"para el viaje", descripcion:"viaje", cuenta:null},
+  {id:27, fecha:"2026-04-11", tipo:"ahorro", monto:25000, moneda:"ARS", categoria:"para el viaje", descripcion:"viaje", cuenta:"efectivo", objetivo_id:"o1"},
+  {id:26, fecha:"2026-02-20", tipo:"ahorro", monto:18000, moneda:"ARS", categoria:"colchón", descripcion:"colchón", cuenta:null, objetivo_id:"o2"},
+];
+
+// Los tres estados que la lista distingue: uno en curso, uno pasado de meta —que
+// se dibuja como completado— y uno en pausa.
+const objetivos = [
+  {id:"o1", nombre:"Viaje a Japón", descripcion:"Dos semanas, en primavera", monto_objetivo:500000,
+   moneda:"ARS", fecha_estimada:"2027-03-15", prioridad:"alta", icono:"✈️", color:"cat-1", estado:"activo"},
+  {id:"o2", nombre:"Fondo de emergencia", descripcion:null, monto_objetivo:15000,
+   moneda:"ARS", fecha_estimada:null, prioridad:"media", icono:"🎯", color:"cat-4", estado:"activo"},
+  {id:"o3", nombre:"Notebook nueva", descripcion:null, monto_objetivo:1200000,
+   moneda:"ARS", fecha_estimada:"2026-12-01", prioridad:"baja", icono:"💻", color:"cat-6", estado:"pausado"},
 ];
 
 const contenido = document.querySelector("#contenido");
@@ -117,12 +164,25 @@ const pantallas = {
 let tab = new URLSearchParams(location.search).get("tab") ?? "inicio";
 if (!pantallas[tab]) tab = "inicio";
 let categoriaAbierta = null;
+// Las dos vistas de detalle del banco: el desglose de una categoría en Gastos y
+// el formulario de objetivo en Ahorros. Van acá y no adentro de pintar() por lo
+// mismo que en la app: redibujar la pantalla no puede perder dónde estabas.
+let vistaObjetivo = null;
+let confirmandoBorrado = false;
 
 // El mismo contexto que arma el router en la app de verdad.
 function pintar() {
   // Lo mismo que hace router.js: es lo que el CSS usa para saber qué layout
   // corresponde en pantalla grande.
   contenido.dataset.pantalla = tab;
+
+  // En el banco TODO pintado se anima, al revés que en la app: acá se viene
+  // justamente a mirar cómo entran las cosas, así que conviene que se repita en
+  // cada toque en vez de solo al cambiar de sección.
+  contenido.classList.remove("es-nueva");
+  void contenido.offsetWidth; // fuerza el reflujo, si no la clase no se reinicia
+  contenido.classList.add("es-nueva");
+  empezarPintado(true);
 
   pantallas[tab](contenido, {
     movimientos,
@@ -138,26 +198,50 @@ function pintar() {
     precios,
     errorPrecios: null,
     sinCotizar: [],
+    // El proxy del bot: le pone precio a lo que no es cripto. AL30 arriba de la
+    // compra y TSLA abajo, para que la lista muestre los dos colores. AAPL y el
+    // FCI quedan afuera a propósito: son el caso "sin cotización".
+    preciosMercado: { "ar:AL30": { precio: 1310 }, "us:TSLA": { precio: 214 } },
+    errorMercado: null,
+    sinCoberturaMercado: ["AAPL"],
+    historico: null,
+    verHistorico: () => {},
+    objetivos,
+    vistaObjetivo,
+    guardando: false,
+    errorObjetivo: null,
+    confirmandoBorrado,
     categoriaAbierta,
     email: "vos@ejemplo.com",
     setMoneda: () => {},
     setCategoria: (c) => { categoriaAbierta = c; pintar(); },
+    abrirObjetivo: (cual) => { vistaObjetivo = cual; confirmandoBorrado = false; pintar(); },
+    pedirBorrado: (si) => { confirmandoBorrado = si; pintar(); },
+    // El banco no guarda ni borra nada: solo sirve para mirar cómo se ve.
+    guardarObjetivo: () => {},
+    borrarObjetivo: () => {},
     onSalir: () => {},
   });
+
+  animarCifras(contenido);
+  terminarPintado();
 }
 
-for (const boton of document.querySelectorAll(".tab")) {
-  boton.classList.toggle("es-activo", boton.dataset.tab === tab);
-  boton.addEventListener("click", () => {
-    for (const otro of document.querySelectorAll(".tab")) {
-      otro.classList.toggle("es-activo", otro === boton);
-    }
-    tab = boton.dataset.tab;
-    categoriaAbierta = null;
-    pintar();
-  });
-}
+// La barra la monta el módulo de verdad, no una copia hecha a mano acá. Es la
+// pieza que más cambia entre tamaños —franja abajo, columna al costado, columna
+// que se abre— y una copia quedaría desincronizada al primer retoque, que es
+// justo cuando el banco tendría que servir para algo.
+const nav = document.querySelector(".tabs");
+montarBarra(nav, TABS_PREVIEW, (id) => {
+  tab = id;
+  categoriaAbierta = null;
+  vistaObjetivo = null;
+  confirmandoBorrado = false;
+  marcarActiva(nav, tab);
+  pintar();
+});
 
+marcarActiva(nav, tab);
 pintar();
 </script>
 </body>

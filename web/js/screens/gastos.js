@@ -7,6 +7,7 @@
 
 import { porMoneda } from "../cuentas.js";
 import { renderDona } from "../donut.js";
+import { esqueletoInsights } from "../esqueleto.js";
 import { enmascararMontos, esc, monto, montosOcultos } from "../format.js";
 import { resumenDeGastos } from "../gastosCuentas.js";
 import { renderLinea } from "../linea.js";
@@ -97,7 +98,7 @@ function vistaDetalle(contenedor, { gastos, categoria, categorias, moneda, perio
       </button>
       <h1 class="pantalla-titulo">${esc(categoria)}</h1>
       <p class="etiqueta">En ${esc(periodo.etiqueta)}</p>
-      <p class="cifra-heroe">${monto(total, moneda)}</p>
+      <p class="cifra-heroe" data-contar="${total}" data-moneda="${esc(moneda)}">${monto(total, moneda)}</p>
       <p class="apunte">
         ${ficha ? `${ficha.porcentaje.toFixed(0)}% de todo lo gastado · ` : ""}
         ${dellaCategoria.length} ${dellaCategoria.length === 1 ? "movimiento" : "movimientos"}
@@ -163,11 +164,7 @@ function panelInsights(ctx) {
   let cuerpo;
 
   if (insightsCargando) {
-    cuerpo = `
-      <p class="insights-cargando" role="status">
-        Analizando tus gastos…
-        <span class="apunte-tenue">Puede tardar hasta un minuto si el servidor estaba dormido.</span>
-      </p>`;
+    cuerpo = esqueletoInsights();
   } else if (errorInsights) {
     cuerpo = `
       <p class="insights-error" role="alert">${esc(errorInsights)}</p>
@@ -206,7 +203,7 @@ function vistaDesglose(contenedor, ctx, resumen) {
       <h1 class="pantalla-titulo">Gastos</h1>
       ${chipsMoneda({ monedas, moneda })}
       <p class="etiqueta">Gastado en ${esc(periodo.etiqueta)}</p>
-      <p class="cifra-heroe">${monto(resumen.total, moneda)}</p>
+      <p class="cifra-heroe" data-contar="${resumen.total}" data-moneda="${esc(moneda)}">${monto(resumen.total, moneda)}</p>
       ${lineaDeVariacion(resumen, periodo)}
     </section>
 
