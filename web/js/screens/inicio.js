@@ -109,7 +109,8 @@ export function renderInicio(contenedor, ctx) {
     <section class="bloque">
       ${chipsMoneda({ monedas, moneda })}
       <p class="etiqueta">Balance de ${esc(periodo.etiqueta)}</p>
-      <p class="cifra-heroe ${balance < 0 ? "es-negativo" : ""}">${monto(balance, moneda)}</p>
+      <p class="cifra-heroe ${balance < 0 ? "es-negativo" : ""}"
+         data-contar="${balance}" data-moneda="${esc(moneda)}">${monto(balance, moneda)}</p>
       <p class="apunte">${
         delPeriodo.length
           ? `${monto(ingresos, moneda)} de ingresos − ${monto(gastos, moneda)} de gastos`
@@ -127,11 +128,11 @@ export function renderInicio(contenedor, ctx) {
     <div class="grilla-2">
       <section class="tarjeta tarjeta-mini">
         <p class="etiqueta">Ingresos</p>
-        <p class="cifra-media">${monto(ingresos, moneda)}</p>
+        <p class="cifra-media" data-contar="${ingresos}" data-moneda="${esc(moneda)}">${monto(ingresos, moneda)}</p>
       </section>
       <section class="tarjeta tarjeta-mini">
         <p class="etiqueta">Ahorrado</p>
-        <p class="cifra-media">${monto(ahorro, moneda)}</p>
+        <p class="cifra-media" data-contar="${ahorro}" data-moneda="${esc(moneda)}">${monto(ahorro, moneda)}</p>
       </section>
     </div>
 

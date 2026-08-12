@@ -13,6 +13,7 @@ import {
   traerPeriodo,
 } from "./data.js";
 import { resumenDeTasas, traerCotizaciones } from "./cotizaciones.js";
+import { esqueletoPantalla } from "./esqueleto.js";
 import { estado, reiniciarEstado } from "./estado.js";
 import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
@@ -107,7 +108,7 @@ async function cerrarSesion() {
 // --------------------------------------------------------------------------
 
 async function cargarDatos() {
-  contenido.innerHTML = `<p class="cargando">Cargando…</p>`;
+  contenido.innerHTML = esqueletoPantalla();
   try {
     // Las dos consultas salen juntas: la comparación contra el período anterior
     // la necesita Gastos, y pedirla recién al entrar a esa pantalla dejaría un

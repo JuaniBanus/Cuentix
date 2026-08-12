@@ -7,6 +7,7 @@
 //   depender solo del color.
 // - El texto usa los tokens de tinta, nunca el color de la serie.
 
+import { enElProximoCuadro, hayQueAnimar } from "./animar.js";
 import { esc, monto, montosOcultos, TOPE_CATEGORIAS } from "./format.js";
 
 const RADIO = 70;
@@ -45,6 +46,12 @@ export function renderDona(
 ) {
   let seleccionado = null;
 
+  // Solo el primer dibujo se anima. `dibujar()` vuelve a correr cada vez que se
+  // toca un gajo o una fila de la leyenda, y una dona que se rearma entera en
+  // cada toque no dejaría comparar dos categorías: para cuando terminó de
+  // abrirse, ya te olvidaste del número anterior.
+  let primerDibujo = hayQueAnimar();
+
   function dibujar() {
     const centro = seleccionado === null
       ? {
@@ -64,15 +71,22 @@ export function renderDona(
       // Con un solo gajo no hay vecino del que separarse, y restarle la
       // separación dejaría una muesca sin motivo.
       const visible = datos.length === 1 ? largo : Math.max(largo - SEPARACION, 0.5);
+      const guion = `${visible} ${CIRCUNFERENCIA - visible}`;
       // El color va en style y no en el atributo stroke: los atributos de
       // presentación de SVG no resuelven var().
+      //
+      // Cuando toca animar, el gajo nace con largo cero y el valor real se
+      // suelta un cuadro después, desde `data-guion`. El dashoffset NO se toca:
+      // es donde arranca cada porción, así que dejándolo fijo cada una crece
+      // desde su propio comienzo y la rueda se arma sola, en vez de girar.
       const gajo = `
         <circle
           class="dona-gajo ${seleccionado === i ? "es-activo" : ""} ${seleccionado !== null && seleccionado !== i ? "es-tenue" : ""}"
           cx="100" cy="100" r="${RADIO}"
           style="stroke:${colorDeCategoria(i)}"
           stroke-width="${seleccionado === i ? GROSOR + 6 : GROSOR}"
-          stroke-dasharray="${visible} ${CIRCUNFERENCIA - visible}"
+          stroke-dasharray="${primerDibujo ? `0 ${CIRCUNFERENCIA}` : guion}"
+          data-guion="${guion}"
           stroke-dashoffset="${-offset}"
           data-indice="${i}"
           tabindex="0"
@@ -105,6 +119,27 @@ export function renderDona(
               <span class="leyenda-pct">${d.porcentaje.toFixed(0)}%</span>
             </li>`).join("")}
         </ul>` : ""}`;
+
+    if (primerDibujo) {
+      primerDibujo = false;
+      const gajos = [...contenedor.querySelectorAll(".dona-gajo")];
+      const ESCALON = 55;
+
+      enElProximoCuadro(() => {
+        gajos.forEach((gajo, i) => {
+          gajo.style.transitionDelay = `${i * ESCALON}ms`;
+          gajo.setAttribute("stroke-dasharray", gajo.dataset.guion);
+        });
+      });
+
+      // El retardo se limpia en cuanto la rueda terminó de armarse. Si quedara
+      // puesto, el último gajo tardaría medio segundo en reaccionar al primer
+      // clic, y eso ya no se lee como una animación sino como que la app se
+      // colgó.
+      setTimeout(() => {
+        for (const gajo of gajos) gajo.style.transitionDelay = "";
+      }, gajos.length * ESCALON + 900);
+    }
 
     for (const nodo of contenedor.querySelectorAll("[data-indice]")) {
       const indice = Number(nodo.dataset.indice);

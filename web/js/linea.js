@@ -14,6 +14,7 @@
 // - El valor no se escribe sobre cada día —serían 31 números encimados—: va uno
 //   solo arriba, que cambia al recorrer el gráfico.
 
+import { dibujarTrazo, hayQueAnimar } from "./animar.js";
 import { esc, fechaCorta, monto } from "./format.js";
 
 const ANCHO = 320;
@@ -119,4 +120,9 @@ export function renderLinea(contenedor, serie, { moneda, periodo }) {
   });
 
   mostrar(cursor);
+
+  // El trazo se dibuja de izquierda a derecha, que es el sentido en el que se
+  // lee el tiempo. El relleno de abajo aparece detrás con su propia animación
+  // en el CSS: si entrara junto con la línea, taparía el recorrido.
+  if (hayQueAnimar()) dibujarTrazo(contenedor.querySelector(".linea-trazo"));
 }
