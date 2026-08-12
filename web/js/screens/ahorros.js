@@ -91,7 +91,7 @@ export function renderAhorros(contenedor, ctx) {
       <h1 class="pantalla-titulo">Ahorros</h1>
       ${chipsMoneda({ monedas, moneda })}
       <p class="etiqueta">Ahorrado en ${esc(periodo.etiqueta)}</p>
-      <p class="cifra-heroe">${monto(total, moneda)}</p>
+      <p class="cifra-heroe" data-contar="${total}" data-moneda="${esc(moneda)}">${monto(total, moneda)}</p>
       <p class="apunte">${
         delPeriodo.length
           ? `${delPeriodo.length} ${delPeriodo.length === 1 ? "movimiento" : "movimientos"}`
