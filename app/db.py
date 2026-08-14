@@ -34,6 +34,7 @@ TABLA = "movimientos"
 TABLA_OBJETIVOS = "objetivos"
 TABLA_INVERSIONES = "inversiones"
 TABLA_ALERTAS = "alertas"
+TABLA_RECORDATORIOS = "recordatorios"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -333,6 +334,47 @@ def _seleccionar_imputados(objetivo_id: str, moneda: Moneda) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
+def guardar_movimientos(movimientos: list[Movimiento]) -> list[int]:
+    """Inserta varios movimientos de una y devuelve sus ids, en el mismo orden.
+
+    Un solo INSERT en vez de N: para un mensaje con cinco gastos, la diferencia
+    es un viaje a Supabase contra cinco.
+
+    Postgres corre el INSERT múltiple como una sola sentencia, así que o entran
+    todos o no entra ninguno. Eso es lo que se quiere: media lista guardada
+    dejaría al usuario sin saber cuáles quedaron.
+    """
+    if not movimientos:
+        return []
+
+    filas = [
+        {
+            "fecha": m.fecha.isoformat(),
+            "tipo": m.tipo.value,
+            "monto": str(m.monto),
+            "moneda": m.moneda.value,
+            "categoria": m.categoria,
+            "descripcion": m.descripcion,
+            "cuenta": m.cuenta,
+        }
+        for m in movimientos
+    ]
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA).insert(filas).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el insert múltiple: %s", detalle)
+        raise DBError(f"No pude guardar los movimientos: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando los movimientos")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data or len(respuesta.data) != len(movimientos):
+        raise DBError("El insert no devolvió todas las filas creadas.")
+    return [int(fila["id"]) for fila in respuesta.data]
+
+
 def guardar_inversion(inversion: Inversion) -> str:
     """Inserta una tenencia en `inversiones` y devuelve su id (uuid).
 
@@ -512,6 +554,112 @@ def borrar_alertas_de_chat(chat_id: int) -> int:
         raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
+# --------------------------------------------------------------------------
+# Recordatorio diario
+# --------------------------------------------------------------------------
+
+
+def obtener_recordatorio(chat_id: int) -> dict | None:
+    """La configuración del chat, o None si nunca la fijó."""
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA_RECORDATORIOS)
+            .select("*")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude leer el recordatorio: {detalle}") from exc
+    except Exception as exc:
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return filas[0] if filas else None
+
+
+def guardar_recordatorio(
+    chat_id: int,
+    *,
+    hora: int | None = None,
+    activo: bool | None = None,
+    zona_horaria: str | None = None,
+) -> dict:
+    """Crea o actualiza la configuración del chat.
+
+    Un upsert por `chat_id`, que es la clave primaria: fijar la hora dos veces
+    pisa la anterior en vez de dejar dos filas que mandarían dos mensajes.
+    """
+    fila: dict[str, Any] = {"chat_id": chat_id, "updated_at": "now()"}
+    if hora is not None:
+        fila["hora"] = hora
+    if activo is not None:
+        fila["activo"] = activo
+    if zona_horaria is not None:
+        fila["zona_horaria"] = zona_horaria
+    if SUPABASE_USER_ID:
+        fila["user_id"] = SUPABASE_USER_ID
+
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA_RECORDATORIOS)
+            .upsert(fila, on_conflict="chat_id")
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el upsert del recordatorio: %s", detalle)
+        raise DBError(f"No pude guardar el recordatorio: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando el recordatorio")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El upsert no devolvió la fila.")
+    return respuesta.data[0]
+
+
+def recordatorios_activos() -> list[dict]:
+    """Todos los recordatorios encendidos.
+
+    El filtro por hora NO se hace en SQL: cada fila tiene su propia zona
+    horaria, así que "son las 21" depende de cuál. La comparación se hace en
+    Python, que es donde está el calendario. Son pocas filas.
+    """
+    try:
+        return (
+            _obtener_cliente()
+            .table(TABLA_RECORDATORIOS)
+            .select("*")
+            .eq("activo", True)
+            .execute()
+        ).data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude leer los recordatorios: {detalle}") from exc
+    except Exception as exc:
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def marcar_recordatorio_enviado(chat_id: int, fecha_local: date) -> None:
+    """Deja constancia del envío para que el mismo día no se repita."""
+    try:
+        (
+            _obtener_cliente()
+            .table(TABLA_RECORDATORIOS)
+            .update({"ultimo_envio": fecha_local.isoformat()})
+            .eq("chat_id", chat_id)
+            .execute()
+        )
+    except Exception as exc:
+        # Si esto falla, el aviso ya salió: se registra y se sigue. El riesgo
+        # es un mensaje repetido dentro de la misma hora, no perder el envío.
+        logger.exception("No pude marcar el recordatorio de %s como enviado", chat_id)
+        raise DBError("No pude registrar el envío del recordatorio.") from exc
+
+
 class Total:
     """Total de una moneda: cuánta plata y cuántos movimientos la componen."""
 
@@ -527,6 +675,73 @@ class Total:
 
     def __repr__(self) -> str:
         return f"Total({self.monto}, {self.cantidad} mov.)"
+
+
+def _escapar_like(texto: str) -> str:
+    r"""Deja inertes los comodines de LIKE dentro de un texto del usuario.
+
+    Sin esto, buscar el comercio "100%" traería todo, y "_" haría de comodín
+    de un carácter. No es una inyección —el valor viaja como parámetro, no
+    concatenado—, pero sí un resultado equivocado y silencioso.
+    """
+    return texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def movimientos_para_analisis(
+    *,
+    desde: date | None = None,
+    hasta: date | None = None,
+    tipo: TipoMovimiento | None = None,
+    moneda: Moneda | None = None,
+    categoria: str | None = None,
+    comercio: str | None = None,
+    limite: int = 5000,
+) -> list[dict]:
+    """Trae las filas crudas que cumplen los filtros, para agregar en Python.
+
+    Los filtros son un conjunto FIJO de parámetros con nombre. No hay forma de
+    pasar un fragmento de consulta: cada valor se entrega a PostgREST con
+    `.eq()` / `.gte()` / `.ilike()`, que lo mandan como parámetro.
+
+    `limite` es un techo de seguridad: una pregunta sin acotar sobre años de
+    historia no puede traer la base entera a memoria.
+    """
+    cliente = _obtener_cliente()
+    filas: list[dict] = []
+    offset = 0
+
+    while len(filas) < limite:
+        tamano = min(PAGINA, limite - len(filas))
+        consulta = _aplicar_filtros(
+            cliente.table(TABLA).select("fecha,tipo,monto,moneda,categoria,descripcion,cuenta"),
+            desde=desde,
+            hasta=hasta,
+            tipo=tipo,
+            moneda=moneda,
+            categoria=categoria,
+        )
+        if comercio:
+            # ilike y no eq: "café" tiene que encontrar "café de la esquina".
+            consulta = consulta.ilike("descripcion", f"%{_escapar_like(comercio.strip().lower())}%")
+
+        consulta = consulta.order("fecha", desc=True).range(offset, offset + tamano - 1)
+
+        try:
+            lote = consulta.execute().data or []
+        except APIError as exc:
+            detalle = getattr(exc, "message", None) or str(exc)
+            logger.error("Supabase rechazó la consulta analítica: %s", detalle)
+            raise DBError(f"Error consultando la base: {detalle}") from exc
+        except Exception as exc:
+            logger.exception("Error de red en la consulta analítica")
+            raise DBError("No pude comunicarme con la base de datos.") from exc
+
+        filas.extend(lote)
+        if len(lote) < tamano:
+            break
+        offset += len(lote)
+
+    return filas
 
 
 def totales_por_moneda(

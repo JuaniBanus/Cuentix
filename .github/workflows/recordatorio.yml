@@ -1,0 +1,68 @@
+# Manda el recordatorio diario a quien le toque, revisando cada hora.
+#
+# ¿Por qué cada hora y no a las 21?
+#
+# Dos motivos, y los dos importan:
+#
+# 1. La hora la elige cada usuario. Uno la quiere a las 21 y otro a las 9; un
+#    cron fijo solo sirve para uno de los dos. El backend decide a quién le
+#    toca comparando contra la zona horaria de cada uno.
+# 2. El cron de GitHub Actions NO es puntual: en momentos de carga los disparos
+#    se retrasan, a veces media hora o más. Con un disparo diario "a las 21",
+#    un atraso significa que ese día no sale nada. Corriendo cada hora, un
+#    atraso mueve el aviso pero no lo pierde.
+#
+# Que no se mande dos veces lo garantiza el backend con `ultimo_envio`, no este
+# archivo: acá no hay forma de saber si la corrida anterior llegó.
+#
+# El servicio de Render duerme tras ~15 minutos sin tráfico, así que el disparo
+# tiene que venir de afuera igual: un scheduler adentro del proceso se
+# congelaría con él, justo de noche que es cuando nadie usó el bot.
+
+name: Recordatorio diario
+
+on:
+  schedule:
+    # En punto de cada hora. El minuto 5 y no el 0 a propósito: a las horas en
+    # punto se agolpan los cron de medio GitHub y los atrasos son peores.
+    - cron: "5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: recordatorio
+  cancel-in-progress: false
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar los recordatorios
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          ALERTAS_SECRET: ${{ secrets.ALERTAS_SECRET }}
+        run: |
+          if [ -z "$BACKEND_URL" ] || [ -z "$ALERTAS_SECRET" ]; then
+            echo "Faltan los secrets BACKEND_URL o ALERTAS_SECRET del repositorio."
+            exit 1
+          fi
+
+          # --max-time generoso: si Render estaba dormido, el primer request
+          # paga el arranque completo.
+          #
+          # El secreto va en la URL, así que -s y --output evitan que quede
+          # escrito en el log de la corrida, que es público en un repo público.
+          codigo=$(curl -s -X POST \
+            --max-time 180 \
+            --retry 2 --retry-delay 30 --retry-connrefused \
+            -o respuesta.json -w "%{http_code}" \
+            "$BACKEND_URL/tareas/recordatorios/$ALERTAS_SECRET")
+
+          echo "HTTP $codigo"
+          cat respuesta.json
+          echo
+
+          if [ "$codigo" = "404" ]; then
+            echo "El secreto no coincide con ALERTAS_SECRET del servidor."
+            exit 1
+          fi
+          [ "$codigo" = "200" ] || exit 1
