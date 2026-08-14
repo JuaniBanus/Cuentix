@@ -13,6 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from app import pendientes
+from app.analitica import ejecutar as ejecutar_plan
+from app.asesor import analizar as analizar_compra
+from app.asesor import redactar as redactar_analisis
+from app.analitica import redactar as redactar_plan
 from app.comandos import respuesta_directa
 from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
 from app.alertas import revisar as revisar_alertas_de_precio
@@ -34,6 +38,7 @@ from app.db import (
     crear_objetivo,
     guardar_inversion,
     guardar_movimiento,
+    guardar_movimientos,
     imputar_movimiento,
     init_db,
     obtener_objetivos,
@@ -48,11 +53,15 @@ from app.models import (
     Inversion,
     Moneda,
     Movimiento,
+    PlanConsulta,
     TipoAlerta,
     TipoInversion,
 )
 from app.objetivos import buscar, parsear_monto, progreso
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
+from app.recordatorio import atender_comando as atender_comando_recordatorio
+from app.recordatorio import enviar_recordatorios
+from app.recordatorio import es_comando as es_comando_recordatorio
 from app.telegram import (
     TelegramError,
     cerrar_cliente,
@@ -203,6 +212,24 @@ async def revisar_alertas(secret: str) -> dict:
     return await revisar_alertas_de_precio()
 
 
+@app.post("/tareas/recordatorios/{secret}")
+async def disparar_recordatorios(secret: str) -> dict:
+    """Manda el recordatorio diario a quien le toque en esta hora.
+
+    Lo llama un cron cada hora, no una persona: mismo criterio que las alertas
+    de precio, y por eso comparte el secreto. Corre en el request y no en un
+    BackgroundTask para que el cron pueda enterarse si algo falló.
+
+    Cada hora y no una vez al día porque la hora la elige cada usuario en su
+    zona, y porque un cron que llega tarde no puede perder el envío.
+    """
+    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
+        logger.warning("Disparo de recordatorios con secreto inválido")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+    return await enviar_recordatorios()
+
+
 @app.get("/api/cuota")
 async def api_cuota() -> dict:
     """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
@@ -331,6 +358,15 @@ async def procesar_update(update: Any) -> None:
         await _responder(chat_id, directa)
         return
 
+    # /recordatorio necesita leer y escribir en la base, así que no puede vivir
+    # en comandos.py, que es solo texto fijo. Pero sí va antes del parser: es
+    # un comando, no algo que haya que interpretar.
+    if es_comando_recordatorio(texto):
+        logger.info("Comando de recordatorio de %s: %r", chat_id, texto)
+        respuesta = await run_in_threadpool(atender_comando_recordatorio, chat_id, texto)
+        await _responder(chat_id, respuesta)
+        return
+
     try:
         # interpretar_mensaje y las funciones de db son síncronas y bloqueantes
         # (HTTP a Gemini y sqlite3). Sin el threadpool frenarían el event loop
@@ -368,6 +404,9 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
         return _confirmacion(movimiento)
 
+    if intencion is Intencion.REGISTRAR_VARIOS:
+        return await _resolver_varios(interpretacion)
+
     if intencion is Intencion.REGISTRAR_INVERSION:
         return await _resolver_inversion(interpretacion)
 
@@ -376,6 +415,12 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
 
     if intencion is Intencion.VER_ALERTAS:
         return await _texto_alertas(chat_id)
+
+    if intencion is Intencion.SIMULAR_COMPRA:
+        return await run_in_threadpool(_resolver_compra, interpretacion.compra)
+
+    if intencion is Intencion.CONSULTA_LIBRE:
+        return await run_in_threadpool(_resolver_plan, interpretacion.plan)
 
     if intencion is Intencion.DESCONOCIDA or interpretacion.consulta is None:
         return MSG_NO_ENTENDI
@@ -491,6 +536,105 @@ async def _texto_alertas(chat_id: int) -> str:
         lineas.append(f"• {f['ticker']} — si {que}")
 
     return "\n".join(lineas)
+
+
+def _resolver_compra(compra: CompraHipotetica | None) -> str:
+    """Analiza una compra hipotética. NO la registra: no pasó todavía."""
+    if compra is None:
+        return MSG_NO_ENTENDI
+
+    logger.info("Compra hipotética: %s %s (%s)", compra.monto, compra.moneda.value, compra.que)
+    return redactar_analisis(analizar_compra(compra), _formatear_monto)
+
+
+def _resolver_plan(plan: PlanConsulta | None) -> str:
+    """Ejecuta una pregunta analítica libre y devuelve la respuesta redactada.
+
+    Si el plan pide comparar, se ejecuta DOS veces —una por período— y la
+    diferencia se calcula en Python. No hay subconsulta ni SQL: comparar no
+    amplía en nada lo que se puede pedir.
+    """
+    if plan is None:
+        return MSG_NO_ENTENDI
+
+    logger.info("Consulta libre: %s", plan.model_dump(exclude_defaults=True))
+
+    resultado = ejecutar_plan(plan)
+    comparacion = (
+        ejecutar_plan(plan, plan.comparar_con) if plan.comparar_con else None
+    )
+    return redactar_plan(plan, resultado, _formatear_monto, comparacion)
+
+
+async def _resolver_varios(interpretacion: Interpretacion) -> str:
+    """Guarda los movimientos que vinieron completos y pregunta por el resto.
+
+    Lo que está claro se guarda SIEMPRE, aunque otro ítem del mismo mensaje
+    haya quedado en duda. Frenar los tres porque uno no se entendió obligaría
+    al usuario a reescribir todo, que es justo lo que este modo evita.
+    """
+    movimientos = list(interpretacion.movimientos)
+    dudas = interpretacion.dudas
+
+    if not movimientos:
+        return _texto_dudas(dudas, ninguno_guardado=True)
+
+    ids = await run_in_threadpool(guardar_movimientos, movimientos)
+    logger.info("Movimientos guardados en lote: %s", ids)
+
+    return _texto_resumen(movimientos, dudas)
+
+
+def _texto_resumen(
+    movimientos: list[Movimiento], dudas: tuple[tuple[str, str], ...]
+) -> str:
+    """Ej: '✅ Registré 3 gastos por $37.000' + el detalle + lo que quedó en duda."""
+    # Los totales van por tipo y por moneda: un mensaje puede traer dos gastos
+    # en pesos y un ingreso en dólares, y "3 movimientos por $X" mezclaría
+    # plata que entra con plata que sale.
+    por_clave: dict[tuple[str, Moneda], Decimal] = {}
+    cuantos: dict[tuple[str, Moneda], int] = {}
+    for m in movimientos:
+        clave = (m.tipo.value, m.moneda)
+        por_clave[clave] = por_clave.get(clave, Decimal("0")) + m.monto
+        cuantos[clave] = cuantos.get(clave, 0) + 1
+
+    encabezados = []
+    for (tipo, moneda), total in sorted(por_clave.items(), key=lambda kv: kv[0][0]):
+        cantidad = cuantos[(tipo, moneda)]
+        etiqueta = _ETIQUETA_TIPO[tipo][2 if cantidad > 1 else 0].lower()
+        encabezados.append(
+            f"{cantidad} {etiqueta} por {_formatear_monto(total, moneda)}"
+        )
+
+    lineas = [f"✅ Registré {' · '.join(encabezados)}"]
+    lineas += [
+        f"  • {m.descripcion or m.categoria}: "
+        f"{_formatear_monto(m.monto, m.moneda)} ({m.categoria})"
+        for m in movimientos
+    ]
+
+    if dudas:
+        lineas.append("")
+        lineas.append(_texto_dudas(dudas))
+
+    return "\n".join(lineas)
+
+
+def _texto_dudas(dudas: tuple[tuple[str, str], ...], ninguno_guardado: bool = False) -> str:
+    """Pregunta solo por los ítems que quedaron sin resolver, citándolos."""
+    if not dudas:
+        return MSG_NO_ENTENDI
+
+    cabeza = (
+        "No pude anotar nada de eso 🤔"
+        if ninguno_guardado
+        else ("Me quedó una duda:" if len(dudas) == 1 else "Me quedaron dudas:")
+    )
+    cuerpo = [f"❓ «{cita}» — {pregunta}" for cita, pregunta in dudas]
+    pie = "Contestame solo eso y lo agrego." if not ninguno_guardado else ""
+
+    return "\n".join([cabeza, *cuerpo] + ([pie] if pie else []))
 
 
 async def _resolver_inversion(interpretacion: Interpretacion) -> str:

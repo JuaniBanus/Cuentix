@@ -69,9 +69,21 @@ Jerga: luca = 1.000 · palo = 1.000.000 · gamba = 100.
 Formato argentino: «15.340,50».
 Si no aclarás moneda, asumo pesos. Para dólares: «dólares», «usd», «verdes».
 
+🌙 CIERRE DEL DÍA
+Contame todo junto y lo separo solo:
+«gasté 5 lucas en el súper, 2 en un café y cargué 30 de nafta»
+→ registro los tres por separado y te confirmo el total.
+Si algún ítem me deja dudando, pregunto SOLO por ese y el resto queda anotado.
+
+Y si querés, te escribo yo: /recordatorio 21 y todas las noches a esa hora
+te pregunto cómo te fue.
+
 ⚙️ COMANDOS
 /start — presentación
 /ayuda — esta ayuda
+/recordatorio — ver si tenés recordatorio diario
+/recordatorio 21 — que te escriba a esa hora
+/recordatorio off — apagarlo
 
 Todavía no puedo editar ni borrar movimientos ya cargados."""
 

@@ -23,12 +23,19 @@ from pydantic import BaseModel, ValidationError
 
 from app.config import GEMINI_API_KEY
 from app.models import (
+    Agregacion,
     Alerta,
+    BasePromedio,
+    CompraHipotetica,
     Consulta,
+    DiaSemana,
+    Dimension,
     Intencion,
     Inversion,
     Moneda,
     Movimiento,
+    Periodo,
+    PlanConsulta,
     TipoAlerta,
     TipoInversion,
     TipoMovimiento,
@@ -106,9 +113,63 @@ class _AlertaExtraida(BaseModel):
     umbral: float | None = None
 
 
+# Un ítem de una lista de varios movimientos. TODO opcional, incluso lo que en
+# `_MovimientoExtraido` es obligatorio: en "gasté 5 lucas en el súper y 2 en un
+# café", el "2" puede ser 2.000 o 2 pesos y no hay forma de saberlo. El ítem
+# tiene que poder volver incompleto y con la duda escrita, para preguntar por
+# ese solo sin frenar a los demás.
+class _MovimientoItem(BaseModel):
+    fecha: date | None = None
+    tipo: TipoMovimiento | None = None
+    monto: float | None = None
+    moneda: Moneda | None = None
+    categoria: str | None = None
+    descripcion: str | None = None
+    cuenta: str | None = None
+    # El pedazo del mensaje del que salió este ítem, para poder citarlo al
+    # preguntar. Sin esto, "no entendí el segundo" no le dice nada a nadie.
+    fragmento: str | None = None
+    # Qué quedó sin resolver, en una frase corta y en segunda persona. null si
+    # el ítem está completo.
+    duda: str | None = None
+
+
+class _PeriodoExtraido(BaseModel):
+    desde: date | None = None
+    hasta: date | None = None
+    etiqueta: str | None = None
+
+
+# El vocabulario de las preguntas libres. Cada campo es un enum cerrado o un
+# valor de filtro: el modelo no puede nombrar una columna ni escribir una
+# condición. Lo que no esté acá, no se puede pedir.
+class _PlanExtraido(BaseModel):
+    agregacion: Agregacion | None = None
+    base_promedio: BasePromedio | None = None
+    agrupar_por: Dimension | None = None
+    tipo: TipoMovimiento | None = None
+    moneda: Moneda | None = None
+    categoria: str | None = None
+    comercio: str | None = None
+    dias_semana: list[DiaSemana] | None = None
+    periodo: _PeriodoExtraido | None = None
+    comparar_con: _PeriodoExtraido | None = None
+    limite: int | None = None
+
+
+class _CompraExtraida(BaseModel):
+    monto: float | None = None
+    moneda: Moneda | None = None
+    que: str | None = None
+    categoria: str | None = None
+
+
 class _InterpretacionExtraida(BaseModel):
     intencion: Intencion
     movimiento: _MovimientoExtraido | None = None
+    movimientos: list[_MovimientoItem] | None = None
+    plan: _PlanExtraido | None = None
+    compra: _CompraExtraida | None = None
     consulta: _ConsultaExtraida | None = None
     inversion: _InversionExtraida | None = None
     alerta: _AlertaExtraida | None = None
@@ -119,6 +180,13 @@ class Interpretacion(NamedTuple):
 
     intencion: Intencion
     movimiento: Movimiento | None = None
+    # Los ítems de un mensaje con varios movimientos que quedaron completos.
+    movimientos: list[Movimiento] = ()
+    # Los que no: (fragmento citado, qué falta preguntar).
+    dudas: tuple[tuple[str, str], ...] = ()
+    plan: PlanConsulta | None = None
+    # Una compra que el usuario está pensando. No se guarda: se analiza.
+    compra: CompraHipotetica | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
     alerta: Alerta | None = None
@@ -256,6 +324,47 @@ DESCRIPCION
   "le pagué a mi psicóloga" -> "sesion".
 - Si el mensaje no dice qué fue, repetí la categoría.
 
+=================== SI SON VARIOS MOVIMIENTOS EN UN MENSAJE ==============
+Poné intencion="registrar_varios" y completá la lista "movimientos", un
+elemento por cada cosa que pasó. Dejá "movimiento" en null.
+
+Esto es lo que la gente hace al final del día:
+  "gasté 5 lucas en el súper, 2 en un café y cargué 30 de nafta"
+  "hoy: 12 mil de farmacia, 8 de almuerzo y cobré 50 de un laburito"
+
+CUÁNDO ES UNO Y CUÁNDO SON VARIOS
+- Un solo hecho, aunque tenga varias frases -> registrar (singular).
+  "gasté 8 lucas en el súper de Palermo con la tarjeta" es UNO.
+- Dos o más hechos con su propio monto -> registrar_varios.
+- Si son varios, van TODOS en la lista, incluso los de distinto tipo:
+  un mensaje puede traer dos gastos y un ingreso.
+
+CADA ÍTEM
+- Las mismas reglas de montos, moneda, tipo, fecha y categoría de arriba.
+- descripcion: la etiqueta corta de ESE ítem ("café", "nafta"), no del mensaje.
+- fragmento: el pedacito del mensaje del que sacaste el ítem, copiado tal cual
+  ("2 en un café"). Sirve para poder citarlo si hay que preguntar.
+- La fecha se hereda: si el mensaje dice "ayer" una sola vez al principio,
+  vale para todos los ítems.
+
+MONTOS ABREVIADOS EN CADENA
+Cuando el usuario enumera, suele decir la unidad una sola vez:
+  "5 lucas en el súper, 2 en un café"  -> el "2" son 2.000, arrastra "lucas".
+Aplicá ese arrastre SOLO cuando el número desnudo es del mismo orden y viene
+en la misma enumeración. Si el arrastre da un monto absurdo para el rubro
+—"30 de nafta" son 30.000, no 30 pesos ni 30 millones—, elegí el orden que
+tenga sentido y NO marques duda.
+
+DUDA: PREGUNTAR POR UNO SIN FRENAR A LOS DEMÁS
+Si de un ítem no podés sacar el monto, o el número admite dos lecturas
+razonables y ninguna es claramente la buena, dejá "monto" en null y escribí
+en "duda" qué necesitás, en una frase corta y tuteando:
+  duda: "¿los 2 del café son 2 mil o 2 pesos?"
+Los demás ítems del mismo mensaje se completan igual: la duda de uno NUNCA
+vacía a los otros. Un ítem con duda no lleva monto inventado.
+No uses "duda" para lo que se puede deducir: la categoría siempre se puede
+elegir, y ante la duda es "otros".
+
 ====================== SI ES UNA COMPRA DE INVERSIÓN =====================
 Poné intencion="registrar_inversion" y completá "inversion". El resto en null.
 
@@ -320,6 +429,97 @@ intencion="crear_alerta" con umbral=null: el sistema pregunta.
 
 Si pide VER las alertas que tiene ("qué alertas tengo", "mostrame mis
 alertas"), poné intencion="ver_alertas" y dejá todo lo demás en null.
+
+================ SI ESTÁ PENSANDO UNA COMPRA QUE NO HIZO ================
+Poné intencion="simular_compra" y completá "compra". El resto en null.
+
+ESTA ES LA DISTINCIÓN MÁS IMPORTANTE DE TODO ESTE PROMPT.
+Confundirla tiene dos costos feos y opuestos: registrar como gasto algo que no
+pasó le ensucia los números, y analizar como hipótesis algo que ya compró le
+hace perder el registro.
+
+YA PASÓ -> registrar (o registrar_varios)
+  Verbos en pasado y hechos consumados:
+  "gasté 8 lucas en el súper" · "me compré unas zapatillas de 90 mil"
+  "pagué la luz" · "compré 500 dólares" · "salió 40 mil"
+  "me gasté" con "me" también es PASADO: es un pasado enfático, no un deseo.
+
+TODAVÍA NO -> simular_compra
+  Deseo, intención, duda o consulta sobre el futuro:
+  "¿me compro unas zapatillas de 90 mil?" · "me quiero comprar una tele de 800 mil"
+  "¿me lo puedo comprar?" · "estoy pensando en gastarme 200 mil en un curso"
+  "quiero gastarme 50 mil en salir" · "¿me alcanza para un viaje de 1 palo?"
+  "vale la pena gastar 300 mil en esto?" · "tengo ganas de comprarme X"
+
+SEÑALES DE HIPÓTESIS
+- Signo de pregunta sobre la compra misma ("¿me compro…?", "¿me alcanza…?").
+- Verbos de deseo o duda: quiero, querría, me gustaría, estoy pensando,
+  tengo ganas, vale la pena, me conviene, debería.
+- Futuro o condicional: "me voy a comprar", "me compraría".
+- Presente que en rioplatense es futuro: "¿me compro X?" NO es "compré X".
+
+CAMPOS
+- monto: el precio de lo que está pensando. Misma jerga y formato que siempre.
+  Si NO hay monto, no uses simular_compra: sin precio no hay nada que analizar.
+  Un "¿me compro unas zapatillas?" sin número es intencion="desconocida".
+- moneda: como siempre, ARS si no se aclara.
+- que: qué es, corto y con las palabras del usuario ("unas zapatillas",
+  "una tele", "un viaje a Brasil"). Sin el precio adentro.
+- categoria: el rubro al que caería si la hiciera, con las mismas etiquetas de
+  siempre (ropa, tecnologia, ocio, viaje...). Sirve para comparar contra lo
+  que ya gasta ahí. Si no encaja en ninguna, null.
+
+==================== SI ES UNA PREGUNTA ANALÍTICA LIBRE ==================
+Poné intencion="consulta_libre" y completá "plan". El resto en null.
+
+Las tres intenciones de abajo (total_por_tipo, total_por_categoria, balance)
+son atajos para las tres preguntas más comunes. Para CUALQUIER otra cosa
+—promedios, máximos, días de la semana, comercios, comparaciones entre
+períodos, "cuántas veces"— usá consulta_libre. Ante la duda, consulta_libre:
+es más expresiva y contesta igual de bien las simples.
+
+CÓMO SE ARMA EL PLAN
+- agregacion: qué número quiere.
+  total (por defecto) · promedio · maximo · minimo · cantidad
+  "¿cuánto gasté?" -> total       "¿cuál fue mi gasto más grande?" -> maximo
+  "¿cuánto gasto en promedio?" -> promedio   "¿cuántas veces?" -> cantidad
+- base_promedio: solo si agregacion=promedio. movimiento (por defecto) · dia · mes
+  "gasto promedio" -> movimiento (cuánto sale cada compra)
+  "cuánto gasto por día" -> dia      "por mes" -> mes
+- agrupar_por: cómo abrir el resultado.
+  ninguna (un número solo) · categoria · comercio · dia_semana · mes · tipo ·
+  moneda · cuenta
+  "¿en qué gasto?" -> categoria      "¿qué día gasto más?" -> dia_semana
+  "¿cómo vengo mes a mes?" -> mes    "¿dónde compro más?" -> comercio
+- tipo / moneda: filtran. null = sin filtrar.
+- categoria: el nombre exacto del rubro, si la pregunta lo nombra.
+- comercio: texto a buscar DENTRO de la descripción del movimiento, cuando
+  pregunta por un lugar o comercio ("¿cuánto gasté en Starbucks?" -> "starbucks").
+  No lo uses para rubros generales: "supermercado" es categoria, no comercio.
+- dias_semana: lista, solo si la pregunta los menciona ("los fines de semana"
+  -> ["sabado", "domingo"]).
+- periodo: desde/hasta y una etiqueta para nombrarlo en la respuesta.
+  Sin fechas si la pregunta no acota el tiempo. Etiquetas: "este mes",
+  "en julio", "este año", "en total", "la semana pasada".
+- comparar_con: SOLO si la pregunta compara dos épocas. Es el período CONTRA
+  el que se compara, con su etiqueta.
+  "¿gasté más este mes que el pasado?" -> periodo = este mes,
+  comparar_con = el mes pasado ("el mes pasado").
+- limite: cuántos grupos mostrar. 8 salvo que pida "el top 3" o similar.
+
+EJEMPLOS
+"¿cuánto gasté en promedio por día este mes?"
+  agregacion=promedio, base_promedio=dia, tipo=gasto, periodo=este mes
+"¿qué día de la semana gasto más?"
+  agregacion=total, agrupar_por=dia_semana, tipo=gasto
+"¿cuál fue mi gasto más grande del año?"
+  agregacion=maximo, tipo=gasto, periodo={{año en curso}}
+"¿cuánto llevo gastado en el chino?"
+  agregacion=total, tipo=gasto, comercio="chino"
+"¿gasté más este mes que el pasado?"
+  agregacion=total, tipo=gasto, periodo=este mes, comparar_con=el mes pasado
+"¿cuántas veces salí a comer en julio?"
+  agregacion=cantidad, tipo=gasto, categoria="comida", periodo=julio
 
 =========================== SI ES UNA CONSULTA ==========================
 Elegí la intención que corresponda, completá "consulta" y dejá
@@ -535,6 +735,115 @@ def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[st
     return alerta, ()
 
 
+def _a_movimientos(
+    items: list[_MovimientoItem] | None, hoy: date
+) -> tuple[list[Movimiento], tuple[tuple[str, str], ...]]:
+    """Separa los ítems completos de los que hay que preguntar.
+
+    Devuelve (movimientos, dudas). Un ítem sin monto usable, o que el modelo
+    marcó con `duda`, no se guarda: se cita para preguntar por él solo. Los
+    demás siguen su camino, que es todo el punto de esta función.
+    """
+    completos: list[Movimiento] = []
+    dudas: list[tuple[str, str]] = []
+
+    for indice, item in enumerate(items or [], start=1):
+        cita = (item.fragmento or item.descripcion or f"ítem {indice}").strip()
+
+        if item.duda:
+            dudas.append((cita, item.duda.strip()))
+            continue
+        if item.monto is None or item.monto <= 0:
+            dudas.append((cita, "¿de cuánto fue?"))
+            continue
+        if item.tipo is None:
+            dudas.append((cita, "¿fue un gasto, un ingreso o un ahorro?"))
+            continue
+
+        categoria = (item.categoria or "otros").strip().lower()[:60] or "otros"
+        descripcion = " ".join((item.descripcion or "").split()).lower()[:60].strip()
+
+        try:
+            completos.append(
+                Movimiento(
+                    fecha=item.fecha or hoy,
+                    tipo=item.tipo,
+                    monto=_decimal_limpio(item.monto),
+                    moneda=item.moneda or Moneda.ARS,
+                    categoria=categoria,
+                    descripcion=descripcion or categoria,
+                    cuenta=(item.cuenta or "").strip()[:40] or None,
+                )
+            )
+        except (ValidationError, InvalidOperation, ValueError) as exc:
+            # Un ítem que no valida no tira abajo el mensaje entero: se
+            # convierte en una pregunta más.
+            logger.info("Ítem inválido en un mensaje múltiple: %s", exc)
+            dudas.append((cita, "no me quedó claro, ¿me lo repetís?"))
+
+    return completos, tuple(dudas)
+
+
+def _a_compra(extraida: _CompraExtraida | None) -> CompraHipotetica | None:
+    """La compra hipotética validada, o None si no hay monto con el que trabajar."""
+    if extraida is None or extraida.monto is None or extraida.monto <= 0:
+        return None
+
+    try:
+        return CompraHipotetica(
+            monto=_decimal_limpio(extraida.monto),
+            moneda=extraida.moneda or Moneda.ARS,
+            que=" ".join((extraida.que or "eso").split())[:60] or "eso",
+            categoria=(extraida.categoria or "").strip().lower()[:60] or None,
+        )
+    except (ValidationError, InvalidOperation, ValueError) as exc:
+        logger.info("Compra hipotética inválida: %s", exc)
+        return None
+
+
+def _a_periodo(extraido: _PeriodoExtraido | None, por_defecto: str) -> Periodo:
+    if extraido is None:
+        return Periodo(etiqueta=por_defecto)
+    desde, hasta = extraido.desde, extraido.hasta
+    if desde and hasta and desde > hasta:  # el modelo los dio al revés
+        desde, hasta = hasta, desde
+    etiqueta = (extraido.etiqueta or "").strip().lower() or por_defecto
+    return Periodo(desde=desde, hasta=hasta, etiqueta=etiqueta[:40])
+
+
+def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
+    """Convierte lo que devolvió el modelo en un plan validado.
+
+    Todo lo que llega se pasa por Pydantic, que rechaza cualquier valor fuera
+    de los enums. Si el modelo inventara una dimensión o una agregación, acá
+    se cae y la pregunta se responde con "no entendí", que es infinitamente
+    mejor que ejecutar algo que nadie previó.
+    """
+    if extraido is None:
+        return PlanConsulta()
+
+    return PlanConsulta(
+        agregacion=extraido.agregacion or Agregacion.TOTAL,
+        base_promedio=extraido.base_promedio or BasePromedio.MOVIMIENTO,
+        agrupar_por=extraido.agrupar_por or Dimension.NINGUNA,
+        tipo=extraido.tipo,
+        moneda=extraido.moneda,
+        categoria=(extraido.categoria or "").strip().lower()[:60] or None,
+        comercio=(extraido.comercio or "").strip().lower()[:60] or None,
+        # dict.fromkeys y no set: preserva el orden en que los nombró.
+        dias_semana=tuple(dict.fromkeys(extraido.dias_semana or ())),
+        periodo=_a_periodo(extraido.periodo, "en total"),
+        comparar_con=(
+            _a_periodo(extraido.comparar_con, "el período anterior")
+            if extraido.comparar_con
+            else None
+        ),
+        # El clamp es del modelo: un limite=500 no puede volverse un mensaje
+        # de 500 renglones en Telegram.
+        limite=min(max(extraido.limite or 8, 1), 50),
+    )
+
+
 def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     """Normaliza los filtros de la consulta. Sin filtros = todo el historial."""
     if extraida is None:
@@ -624,6 +933,19 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             else None,
         )
 
+    if extraida.intencion is Intencion.REGISTRAR_VARIOS:
+        movimientos, dudas = _a_movimientos(extraida.movimientos, hoy)
+        if not movimientos and not dudas:
+            # Dijo "varios" y no mandó ninguno: no hay nada que guardar ni
+            # nada que preguntar, así que es lo mismo que no haber entendido.
+            logger.warning("Intención registrar_varios sin ítems para %r", texto)
+            raise ParserError("Dijo varios movimientos pero no extrajo ninguno.")
+        return Interpretacion(
+            intencion=Intencion.REGISTRAR_VARIOS,
+            movimientos=movimientos,
+            dudas=dudas,
+        )
+
     if extraida.intencion is Intencion.REGISTRAR_INVERSION:
         inversion, faltantes = _a_inversion(extraida.inversion, hoy)
         return Interpretacion(
@@ -640,6 +962,21 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
 
     if extraida.intencion is Intencion.VER_ALERTAS:
         return Interpretacion(intencion=Intencion.VER_ALERTAS)
+
+    if extraida.intencion is Intencion.SIMULAR_COMPRA:
+        compra = _a_compra(extraida.compra)
+        if compra is None:
+            # Sin monto no hay nada que analizar. Mejor "no entendí" que un
+            # análisis sobre un número inventado.
+            logger.info("simular_compra sin monto usable para %r", texto)
+            return Interpretacion(intencion=Intencion.DESCONOCIDA)
+        return Interpretacion(intencion=Intencion.SIMULAR_COMPRA, compra=compra)
+
+    if extraida.intencion is Intencion.CONSULTA_LIBRE:
+        return Interpretacion(
+            intencion=Intencion.CONSULTA_LIBRE,
+            plan=_a_plan(extraida.plan),
+        )
 
     if extraida.intencion is Intencion.DESCONOCIDA:
         return Interpretacion(intencion=Intencion.DESCONOCIDA)
