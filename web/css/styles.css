@@ -923,6 +923,74 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .movimiento-monto { font-size: 14.5px; font-weight: 500; }
 .movimiento-monto.es-ingreso { color: var(--acento-tinta); }
 
+/* --------------------------------------------------- Termómetro de precios */
+
+.termo { display: flex; flex-direction: column; gap: 4px; }
+
+.termo-subtitulo {
+  font-size: 13px; color: var(--tenue); font-weight: 500;
+  margin: 18px 0 2px;
+}
+
+.termo-lista { display: flex; flex-direction: column; margin-top: 4px; }
+
+.termo-fila {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--borde);
+}
+.termo-fila:last-child { border-bottom: 0; }
+
+.termo-texto { display: flex; flex-direction: column; min-width: 0; }
+.termo-nombre { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.termo-sub {
+  font-size: 12px; color: var(--tenue-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.termo-cifras {
+  display: flex; flex-direction: column; align-items: flex-end;
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+.termo-var { font-size: 14px; font-weight: 500; }
+.termo-tem { font-size: 11.5px; color: var(--tenue-2); }
+
+.termo-pendientes {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+  font-size: 12.5px; color: var(--tenue-2); line-height: 1.4;
+}
+
+/* La nota final va separada del resto: es la letra chica de todo el bloque. */
+.termo-nota {
+  margin-top: 16px; padding-top: 12px;
+  border-top: 1px solid var(--borde);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------ Patrimonio */
+
+.patrimonio { display: flex; flex-direction: column; gap: 4px; }
+.patrimonio-cifras { margin: 6px 0 2px; }
+.patrimonio-lectura { margin-top: 6px; }
+.patrimonio-grafico { margin-top: 14px; }
+
+.patrimonio-linea { width: 100%; height: auto; display: block; overflow: visible; }
+.patrimonio-trazo {
+  fill: none; stroke: var(--acento-claro);
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.patrimonio-area { fill: color-mix(in srgb, var(--acento) 16%, transparent); stroke: none; }
+.patrimonio-punto { fill: var(--acento-claro); }
+
+.patrimonio-ejes {
+  display: flex; justify-content: space-between;
+  margin-top: 4px;
+  font-size: 11.5px; color: var(--tenue-2);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ------------------------------------------------------------------- Tabs */
 
 .tabs {

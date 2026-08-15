@@ -20,6 +20,12 @@ export const estado = {
   // Todos los ahorros, sin acotar por período: el ahorro es un stock y su
   // evolución solo se lee mirando la historia entera.
   historialAhorros: [],
+  // Todos los gastos, sin acotar por período: el termómetro de inflación
+  // compara precios entre meses y con el mes elegido no vería nada.
+  historialGastos: [],
+  // Serie histórica del dólar oficial, para valuar el patrimonio de cada mes
+  // a la cotización de ESE mes. null = no llegó o no se pudo traer.
+  serieDolar: null,
   // La cotización la guarda format.js, que es quien convierte. Acá solo queda
   // si el pedido falló, para poder avisarlo en pantalla.
   falloCotizacion: false,
@@ -81,6 +87,8 @@ export function reiniciarEstado() {
   estado.movimientos = [];
   estado.movimientosPrevios = [];
   estado.historialAhorros = [];
+  estado.historialGastos = [];
+  estado.serieDolar = null;
   estado.inversiones = null;
   estado.errorInversiones = null;
   estado.precios = {};

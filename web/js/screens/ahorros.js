@@ -6,6 +6,7 @@
 // nada. El total y el reparto sí respetan el período, como en todas las
 // pantallas; la línea dice explícitamente que es todo el historial.
 
+import { renderPatrimonio } from "./patrimonio.js";
 import { porMoneda, serieAcumulada, totalesPorCuenta, totalPorTipo } from "../cuentas.js";
 import { colorDeCategoria } from "../donut.js";
 import { cotizacionActual, esc, monto, montosOcultos, verEnDolares } from "../format.js";
@@ -64,6 +65,18 @@ function barrasPorCuenta(lugares, moneda) {
 
 export function renderAhorros(contenedor, ctx) {
   const { movimientos, historialAhorros, moneda, monedas, periodo, setMoneda, objetivos } = ctx;
+  // El patrimonio va al final de esta pantalla y se dibuja después de que la
+  // vista principal escribió su innerHTML, porque si no lo borraría.
+  const alFinal = () => {
+    if (historialAhorros?.length || ctx.inversiones?.length) {
+      renderPatrimonio(contenedor, {
+        ahorros: historialAhorros,
+        inversiones: ctx.inversiones ?? [],
+        moneda,
+        serieDolar: ctx.serieDolar ?? null,
+      });
+    }
+  };
 
   // Crear o editar ocupa la pantalla entera, como el detalle de categoría en
   // Gastos.
@@ -133,4 +146,5 @@ export function renderAhorros(contenedor, ctx) {
 
   engancharMonedas(contenedor, setMoneda);
   engancharObjetivos(contenedor, ctx);
+  alFinal();
 }

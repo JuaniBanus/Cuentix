@@ -17,6 +17,7 @@ import { esqueletoPantalla } from "./esqueleto.js";
 import { estado, reiniciarEstado } from "./estado.js";
 import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
+import { serieDolar } from "./patrimonio.js";
 import { anterior, mesActual } from "./periodo.js";
 import { traerHistorico, traerPrecios } from "./mercado.js";
 import { traerPreciosCripto } from "./precios.js";
@@ -113,18 +114,36 @@ async function cargarDatos() {
     // Las dos consultas salen juntas: la comparación contra el período anterior
     // la necesita Gastos, y pedirla recién al entrar a esa pantalla dejaría un
     // hueco de carga cada vez que se toca la tab.
-    const [actuales, previos, ahorros, objetivos] = await Promise.all([
+    const [actuales, previos, ahorros, objetivos, gastos] = await Promise.all([
       traerPeriodo(estado.periodo),
       traerPeriodo(anterior(estado.periodo)),
       // Sin acotar por fecha: la evolución del ahorro se lee sobre la historia
       // entera, no sobre el mes elegido.
       traerMovimientos({ tipo: "ahorro" }),
       traerObjetivos(),
+      // Tampoco se acota: el termómetro compara el precio de un ítem entre
+      // meses distintos, y con el mes elegido no vería ninguna variación.
+      traerMovimientos({ tipo: "gasto" }),
     ]);
 
     estado.movimientos = actuales;
     estado.movimientosPrevios = previos;
     estado.historialAhorros = ahorros;
+    estado.historialGastos = gastos;
+
+    // La serie del dólar no se espera: es de terceros y solo la usa una
+    // sección. Cuando llega, se repinta. Si falla, el patrimonio se muestra
+    // en pesos y lo dice.
+    if (!estado.serieDolar) {
+      serieDolar()
+        .then((serie) => {
+          if (serie) {
+            estado.serieDolar = serie;
+            pintar();
+          }
+        })
+        .catch(() => {});
+    }
     estado.objetivos = objetivos;
     estado.error = null;
 
