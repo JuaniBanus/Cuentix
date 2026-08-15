@@ -52,6 +52,8 @@ class Intencion(str, Enum):
     # Una compra que TODAVÍA NO PASÓ y el usuario está pensando. No se
     # registra nada: se analiza y se le devuelve su situación para que decida.
     SIMULAR_COMPRA = "simular_compra"
+    # "¿12 cuotas de $X o $Y al contado?". Tampoco registra nada: compara.
+    COMPARAR_CUOTAS = "comparar_cuotas"
     CONSULTA_LIBRE = "consulta_libre"
     TOTAL_POR_TIPO = "total_por_tipo"
     TOTAL_POR_CATEGORIA = "total_por_categoria"
@@ -78,6 +80,21 @@ class Movimiento(BaseModel):
     # descarta. El tope de 60 es el mismo que el de categoria, porque ahora
     # son dos etiquetas del mismo orden y no un texto libre.
     descripcion: str = Field(min_length=1, max_length=60)
+    # DÓNDE se compró, separado de `categoria` que es QUÉ tipo de gasto es.
+    # Es lo que identifica una compra repetida: "coto" se repite, "compra
+    # grande del mes" cambia cada vez.
+    comercio: str | None = Field(default=None, max_length=60)
+    # Identificador estable del ítem, para poder seguir su precio en el
+    # tiempo. Lo calcula app/items.py al guardar, no el modelo.
+    clave_item: str | None = Field(default=None, max_length=60)
+    # Precio por unidad y su unidad, cuando el usuario los dice. Sin esto, el
+    # total de una compra variable mezcla precio con cantidad y no sirve para
+    # medir inflación.
+    cantidad: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=3)
+    unidad: str | None = Field(default=None, max_length=20)
+    precio_unitario: Decimal | None = Field(
+        default=None, gt=0, max_digits=14, decimal_places=2
+    )
     # Dónde está la plata: "efectivo", "banco", "billetera virtual".
     #
     # None significa que el usuario no lo dijo, y es un valor legítimo: la
@@ -247,6 +264,25 @@ class CompraHipotetica(BaseModel):
     que: str = Field(min_length=1, max_length=60)
     # Para poder comparar contra lo que ya gasta en ese rubro.
     categoria: str | None = Field(default=None, max_length=60)
+
+
+class Financiacion(BaseModel):
+    """Una compra financiada a comparar contra su precio de contado.
+
+    Como la compra hipotética, no se guarda en ningún lado: vive lo que dura
+    la respuesta.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    cuotas: int = Field(gt=0, le=120)
+    monto_cuota: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    precio_contado: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    moneda: Moneda = Moneda.ARS
+    que: str | None = Field(default=None, max_length=60)
+    # Tasa mensual que el usuario dice conseguir con su plata (0.04 = 4%). Si
+    # viene, gana sobre la del mercado: él sabe dónde la pone y nosotros no.
+    tasa_mensual: Decimal | None = Field(default=None, gt=0, lt=1)
 
 
 class Consulta(BaseModel):

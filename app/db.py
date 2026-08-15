@@ -190,6 +190,15 @@ def guardar_movimiento(movimiento: Movimiento, objetivo_id: str | None = None) -
         "moneda": movimiento.moneda.value,
         "categoria": movimiento.categoria,
         "descripcion": movimiento.descripcion,
+        "comercio": movimiento.comercio,
+        "clave_item": movimiento.clave_item,
+        "cantidad": str(movimiento.cantidad) if movimiento.cantidad is not None else None,
+        "unidad": movimiento.unidad,
+        "precio_unitario": (
+            str(movimiento.precio_unitario)
+            if movimiento.precio_unitario is not None
+            else None
+        ),
         # None viaja como null y la columna queda vacía, que es lo que
         # corresponde cuando el usuario no dijo dónde guardó la plata.
         "cuenta": movimiento.cuenta,
@@ -658,6 +667,87 @@ def marcar_recordatorio_enviado(chat_id: int, fecha_local: date) -> None:
         # es un mensaje repetido dentro de la misma hora, no perder el envío.
         logger.exception("No pude marcar el recordatorio de %s como enviado", chat_id)
         raise DBError("No pude registrar el envío del recordatorio.") from exc
+
+
+def claves_de_items(*, limite: int = 1000) -> list[str]:
+    """Las claves de ítem que el usuario ya usó, para agrupar contra ellas."""
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA)
+            .select("clave_item")
+            .not_.is_("clave_item", "null")
+            .limit(limite)
+            .execute()
+        ).data or []
+    except Exception:
+        # Sin las conocidas, el ítem entra con su clave normalizada y listo:
+        # se agrupa peor, pero no se pierde el movimiento.
+        logger.warning("No pude leer las claves de ítems", exc_info=True)
+        return []
+
+    return sorted({(f.get("clave_item") or "").strip() for f in filas} - {""})
+
+
+def historial_de_item(clave: str, *, limite: int = 60) -> list[dict]:
+    """Las compras anteriores de un ítem, de la más vieja a la más nueva."""
+    if not clave:
+        return []
+    try:
+        return (
+            _obtener_cliente()
+            .table(TABLA)
+            .select("fecha,monto,moneda,precio_unitario,categoria")
+            .eq("clave_item", clave)
+            .eq("tipo", TipoMovimiento.GASTO.value)
+            .order("fecha")
+            .limit(limite)
+            .execute()
+        ).data or []
+    except Exception:
+        logger.warning("No pude leer el historial de %r", clave, exc_info=True)
+        return []
+
+
+def movimientos_para_termometro(*, desde: date | None = None) -> list[dict]:
+    """Gastos con clave de ítem, para calcular la inflación personal."""
+    try:
+        consulta = (
+            _obtener_cliente()
+            .table(TABLA)
+            .select("fecha,monto,moneda,categoria,clave_item,precio_unitario,unidad")
+            .eq("tipo", TipoMovimiento.GASTO.value)
+            .not_.is_("clave_item", "null")
+            .order("fecha")
+        )
+        if desde is not None:
+            consulta = consulta.gte("fecha", desde.isoformat())
+        return consulta.execute().data or []
+    except Exception:
+        logger.warning("No pude leer los movimientos del termómetro", exc_info=True)
+        return []
+
+
+def obtener_inversiones(*, limite: int = 100) -> list[dict]:
+    """Las tenencias del usuario. Hoy solo se usa para saber si tiene alguna.
+
+    Devuelve [] ante cualquier error en vez de propagar: quien la llama la usa
+    para decidir si agrega una línea a un mensaje, y no vale la pena tirar
+    abajo la respuesta entera por eso.
+    """
+    try:
+        consulta = (
+            _obtener_cliente()
+            .table(TABLA_INVERSIONES)
+            .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra")
+            .limit(limite)
+        )
+        if SUPABASE_USER_ID:
+            consulta = consulta.eq("user_id", SUPABASE_USER_ID)
+        return consulta.execute().data or []
+    except Exception:
+        logger.warning("No pude leer las inversiones", exc_info=True)
+        return []
 
 
 class Total:

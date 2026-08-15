@@ -121,7 +121,13 @@ export async function traerMovimientos({ desde, hasta, tipo } = {}) {
   for (let pagina = 0; ; pagina++) {
     let consulta = sb
       .from("movimientos")
-      .select("id, fecha, tipo, monto, moneda, categoria, descripcion, cuenta, objetivo_id")
+      .select(
+        "id, fecha, tipo, monto, moneda, categoria, descripcion, cuenta, objetivo_id, " +
+        // Para el termómetro de inflación personal. Van en la misma consulta y
+        // no en una aparte: son cinco columnas más sobre filas que igual se
+        // traen, contra un viaje entero a la base.
+        "clave_item, comercio, cantidad, unidad, precio_unitario"
+      )
       .order("fecha", { ascending: false })
       .order("id", { ascending: false })
       .range(pagina * PAGINA, (pagina + 1) * PAGINA - 1);

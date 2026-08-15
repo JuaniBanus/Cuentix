@@ -13,6 +13,8 @@ import { resumenDeGastos } from "../gastosCuentas.js";
 import { renderLinea } from "../linea.js";
 import { anterior } from "../periodo.js";
 import { acotar, celdasDeBarra, chipsMoneda, engancharMonedas, listaMovimientos } from "./comunes.js";
+import { renderComparacion, renderRecurrentes } from "./recurrentes.js";
+import { renderTermometro } from "./termometro.js";
 
 // --------------------------------------------------------------------------
 // Pedazos
@@ -285,4 +287,28 @@ export function renderGastos(contenedor, ctx) {
   }
 
   vistaDesglose(contenedor, ctx, resumen);
+
+  // El termómetro va al final y mira TODO el historial, no el período: comparar
+  // precios necesita meses. Se agrega después de que vistaDesglose escribió su
+  // innerHTML, porque si no lo borraría.
+  if (ctx.historialGastos?.length) {
+    // Los tres miran TODO el historial, no el período: comparar precios,
+    // detectar periodicidad y promediar seis meses necesitan meses.
+    renderComparacion(contenedor, {
+      historial: ctx.historialGastos.concat(ctx.historialAhorros ?? []),
+      delPeriodo: movimientos,
+      mesActual: (periodo?.desde ?? "").slice(0, 7),
+      moneda,
+    });
+    renderRecurrentes(contenedor, {
+      historial: ctx.historialGastos,
+      moneda,
+      hoy: ctx.hoy,
+    });
+    renderTermometro(contenedor, {
+      historial: ctx.historialGastos,
+      moneda,
+      inflacionOficial: ctx.inflacionOficial ?? null,
+    });
+  }
 }

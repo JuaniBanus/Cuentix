@@ -17,7 +17,12 @@ from app.analitica import ejecutar as ejecutar_plan
 from app.asesor import analizar as analizar_compra
 from app.asesor import redactar as redactar_analisis
 from app.analitica import redactar as redactar_plan
+from app.cartera import rendimiento as rendimiento_cartera
 from app.comandos import respuesta_directa
+from app.cuotas import comparar as comparar_cuotas
+from app.cuotas import pedir_faltantes as pedir_faltantes_cuotas
+from app.cuotas import redactar as redactar_cuotas
+from app.tasas import obtener as obtener_tasas
 from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
 from app.alertas import revisar as revisar_alertas_de_precio
 from app.insights import AgregadosGastos, InsightsError
@@ -31,16 +36,24 @@ from app.mercado import presupuesto as presupuesto_mercado
 from app.sesion_web import SesionInvalida
 from app.sesion_web import cerrar_cliente as cerrar_cliente_sesion
 from app.sesion_web import verificar as verificar_sesion
+from app.inflacion import detectar_salto
+from app.items import clave_para
+from app.recurrentes import detectar as detectar_recurrentes
+from app.recurrentes import redactar as redactar_recurrentes
 from app.db import (
     DBError,
     Total,
     balance,
+    claves_de_items,
     crear_objetivo,
+    historial_de_item,
+    movimientos_para_termometro,
     guardar_inversion,
     guardar_movimiento,
     guardar_movimientos,
     imputar_movimiento,
     init_db,
+    obtener_inversiones,
     obtener_objetivos,
     total_imputado,
     totales_por_categoria,
@@ -48,7 +61,9 @@ from app.db import (
 )
 from app.models import (
     Alerta,
+    CompraHipotetica,
     Consulta,
+    Financiacion,
     Intencion,
     Inversion,
     Moneda,
@@ -56,6 +71,7 @@ from app.models import (
     PlanConsulta,
     TipoAlerta,
     TipoInversion,
+    TipoMovimiento,
 )
 from app.objetivos import buscar, parsear_monto, progreso
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
@@ -361,6 +377,11 @@ async def procesar_update(update: Any) -> None:
     # /recordatorio necesita leer y escribir en la base, así que no puede vivir
     # en comandos.py, que es solo texto fijo. Pero sí va antes del parser: es
     # un comando, no algo que haya que interpretar.
+    if _es_comando_recurrentes(texto):
+        logger.info("Comando de recurrentes de %s", chat_id)
+        await _responder(chat_id, await run_in_threadpool(_texto_recurrentes))
+        return
+
     if es_comando_recordatorio(texto):
         logger.info("Comando de recordatorio de %s: %r", chat_id, texto)
         respuesta = await run_in_threadpool(atender_comando_recordatorio, chat_id, texto)
@@ -396,13 +417,16 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
     intencion = interpretacion.intencion
 
     if intencion is Intencion.REGISTRAR:
-        movimiento = interpretacion.movimiento
+        movimiento = await run_in_threadpool(_con_clave_item, interpretacion.movimiento)
         if interpretacion.objetivo:
             return await _registrar_hacia_objetivo(chat_id, movimiento, interpretacion.objetivo)
 
+        # El aviso se busca ANTES de guardar: si no, la compra recién hecha
+        # entraría en su propio historial y se compararía contra sí misma.
+        aviso = await run_in_threadpool(_aviso_de_salto, movimiento)
         movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
-        return _confirmacion(movimiento)
+        return _confirmacion(movimiento) + aviso
 
     if intencion is Intencion.REGISTRAR_VARIOS:
         return await _resolver_varios(interpretacion)
@@ -418,6 +442,11 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
 
     if intencion is Intencion.SIMULAR_COMPRA:
         return await run_in_threadpool(_resolver_compra, interpretacion.compra)
+
+    if intencion is Intencion.COMPARAR_CUOTAS:
+        return await _resolver_cuotas(
+            interpretacion.financiacion, interpretacion.faltantes
+        )
 
     if intencion is Intencion.CONSULTA_LIBRE:
         return await run_in_threadpool(_resolver_plan, interpretacion.plan)
@@ -538,6 +567,47 @@ async def _texto_alertas(chat_id: int) -> str:
     return "\n".join(lineas)
 
 
+async def _resolver_cuotas(
+    financiacion: Financiacion | None, faltantes: tuple[str, ...]
+) -> str:
+    """Compara cuotas contra contado. No registra nada: todavía no compró.
+
+    Es async porque cotizar la cartera sale a la red (CoinGecko y el proxy de
+    mercado). Lo bloqueante —las tasas y la lectura de la base— va al
+    threadpool para no frenar el event loop.
+    """
+    if financiacion is None:
+        return pedir_faltantes_cuotas(faltantes or ("cuotas", "monto_cuota", "precio_contado"))
+
+    logger.info(
+        "Cuotas vs contado: %s x %s vs %s",
+        financiacion.cuotas, financiacion.monto_cuota, financiacion.precio_contado,
+    )
+
+    tasas = await run_in_threadpool(obtener_tasas)
+    comparacion = comparar_cuotas(financiacion, tasas)
+
+    try:
+        tiene_inversiones = bool(await run_in_threadpool(obtener_inversiones, limite=1))
+    except Exception:
+        logger.warning("No pude ver si tiene inversiones", exc_info=True)
+        tiene_inversiones = False
+
+    # El rendimiento de la cartera se calcula solo si hace falta: si el usuario
+    # ya dijo a cuánto le rinde su plata, ese número manda y salir a cotizar
+    # sería gastar cuota del proveedor para nada.
+    cartera = None
+    if tiene_inversiones and financiacion.tasa_mensual is None:
+        try:
+            cartera = await rendimiento_cartera(financiacion.moneda)
+        except Exception:
+            # Que no se pueda cotizar la cartera no puede dejar sin respuesta
+            # una cuenta que ya está hecha con la tasa de plazo fijo.
+            logger.warning("No pude calcular el rendimiento de la cartera", exc_info=True)
+
+    return redactar_cuotas(comparacion, _formatear_monto, tiene_inversiones, cartera)
+
+
 def _resolver_compra(compra: CompraHipotetica | None) -> str:
     """Analiza una compra hipotética. NO la registra: no pasó todavía."""
     if compra is None:
@@ -564,6 +634,114 @@ def _resolver_plan(plan: PlanConsulta | None) -> str:
         ejecutar_plan(plan, plan.comparar_con) if plan.comparar_con else None
     )
     return redactar_plan(plan, resultado, _formatear_monto, comparacion)
+
+
+_COMANDOS_RECURRENTES = frozenset({
+    "/recurrentes", "/suscripciones", "/subs",
+})
+
+
+def _es_comando_recurrentes(texto: str) -> bool:
+    # En un grupo Telegram manda "/recurrentes@Cuentix_Bot".
+    clave = (texto or "").strip().lower().split("@", 1)[0]
+    return clave in _COMANDOS_RECURRENTES
+
+
+def _texto_recurrentes() -> str:
+    """Los cargos que se repiten, con la sugerencia de revisarlos."""
+    try:
+        filas = movimientos_para_termometro()
+    except Exception:
+        logger.exception("No pude leer los movimientos para recurrentes")
+        return MSG_ERROR_INTERNO
+
+    # Se mira la moneda con más movimientos: es donde está la vida del usuario.
+    conteo: dict[str, int] = {}
+    for fila in filas:
+        conteo[fila.get("moneda", "ARS")] = conteo.get(fila.get("moneda", "ARS"), 0) + 1
+    moneda = Moneda(max(conteo, key=conteo.get)) if conteo else Moneda.ARS
+
+    encontrados = detectar_recurrentes(filas, moneda.value)
+    logger.info("Recurrentes detectados: %s en %s", len(encontrados), moneda.value)
+    return redactar_recurrentes(encontrados, moneda, _formatear_monto)
+
+
+def _con_clave_item(movimiento: Movimiento | None) -> Movimiento | None:
+    """Le agrega al movimiento la clave con la que se agrupa su ítem.
+
+    Se calcula ACÁ y se guarda en la fila, en vez de derivarla al consultar:
+    el algoritmo de agrupación mira las claves existentes, así que recalcularlo
+    después daría resultados distintos a medida que crece el historial y el
+    termómetro cambiaría de números sin que nadie toque nada.
+    """
+    if movimiento is None or movimiento.tipo is not TipoMovimiento.GASTO:
+        return movimiento
+
+    try:
+        clave = clave_para(
+            descripcion=movimiento.descripcion,
+            comercio=movimiento.comercio,
+            conocidas=claves_de_items(),
+        )
+    except Exception:
+        logger.warning("No pude calcular la clave del ítem", exc_info=True)
+        return movimiento
+
+    return movimiento.model_copy(update={"clave_item": clave or None})
+
+
+def _aviso_de_salto(movimiento: Movimiento) -> str:
+    """La línea extra cuando el ítem se despegó de lo que venía saliendo.
+
+    Se compara precio unitario contra precio unitario, o total contra total,
+    pero nunca uno contra otro: son magnitudes distintas y mezclarlas daría un
+    salto inventado.
+    """
+    if movimiento.clave_item is None or movimiento.tipo is not TipoMovimiento.GASTO:
+        return ""
+
+    try:
+        historial = historial_de_item(movimiento.clave_item)
+    except Exception:
+        logger.warning("No pude revisar el historial del ítem", exc_info=True)
+        return ""
+
+    usa_unitario = movimiento.precio_unitario is not None
+    nuevo = movimiento.precio_unitario if usa_unitario else movimiento.monto
+
+    previos = []
+    for fila in historial:
+        if fila.get("moneda") != movimiento.moneda.value:
+            continue  # $ y US$ no se comparan entre sí
+        crudo = fila.get("precio_unitario") if usa_unitario else fila.get("monto")
+        if crudo is None:
+            continue
+        try:
+            valor = Decimal(str(crudo))
+        except (InvalidOperation, ValueError):
+            continue
+        if valor > 0:
+            previos.append(valor)
+
+    salto = detectar_salto(nuevo, previos)
+    if salto is None:
+        return ""
+
+    ordenados = sorted(previos)
+    medio = len(ordenados) // 2
+    habitual = (
+        ordenados[medio] if len(ordenados) % 2
+        else (ordenados[medio - 1] + ordenados[medio]) / 2
+    )
+    unidad = f" por {movimiento.unidad}" if usa_unitario and movimiento.unidad else ""
+    verbo = "más" if salto > 0 else "menos"
+    flecha = "📈" if salto > 0 else "📉"
+
+    return (
+        f"\n{flecha} Ojo: {movimiento.clave_item} venía saliendo "
+        f"~{_formatear_monto(habitual.quantize(Decimal('0.01')), movimiento.moneda)}{unidad}. "
+        f"Esto es {abs(salto) * 100:.0f}% {verbo}."
+    )
 
 
 async def _resolver_varios(interpretacion: Interpretacion) -> str:

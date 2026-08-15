@@ -30,6 +30,7 @@ from app.models import (
     Consulta,
     DiaSemana,
     Dimension,
+    Financiacion,
     Intencion,
     Inversion,
     Moneda,
@@ -79,6 +80,15 @@ class _MovimientoExtraido(BaseModel):
     # `str` con default "", el schema la pediría igual y el modelo llenaría el
     # hueco con lo primero que le suene.
     cuenta: str | None = None
+    # DÓNDE se compró ("coto", "shell", "edesur"). Se separa de la descripción
+    # porque es lo que identifica una compra repetida en el tiempo.
+    comercio: str | None = None
+    # Cuánto y de qué, cuando el usuario lo dice: "20 litros", "2 kg". Con
+    # esto se puede sacar el precio por unidad, que es lo único que permite
+    # medir inflación en una compra variable.
+    cantidad: float | None = None
+    unidad: str | None = None
+    precio_unitario: float | None = None
     # PARA QUÉ se aparta la plata, cuando el usuario nombra una meta. No es una
     # columna: es el texto con el que después se busca el objetivo.
     objetivo: str | None = None
@@ -164,12 +174,25 @@ class _CompraExtraida(BaseModel):
     categoria: str | None = None
 
 
+class _FinanciacionExtraida(BaseModel):
+    cuotas: int | None = None
+    monto_cuota: float | None = None
+    # Alternativa a monto_cuota: el total financiado, del que se deduce la cuota.
+    total_financiado: float | None = None
+    precio_contado: float | None = None
+    moneda: Moneda | None = None
+    que: str | None = None
+    # Porcentaje mensual dicho por el usuario ("gano 4% por mes" -> 4).
+    tasa_mensual_pct: float | None = None
+
+
 class _InterpretacionExtraida(BaseModel):
     intencion: Intencion
     movimiento: _MovimientoExtraido | None = None
     movimientos: list[_MovimientoItem] | None = None
     plan: _PlanExtraido | None = None
     compra: _CompraExtraida | None = None
+    financiacion: _FinanciacionExtraida | None = None
     consulta: _ConsultaExtraida | None = None
     inversion: _InversionExtraida | None = None
     alerta: _AlertaExtraida | None = None
@@ -187,6 +210,8 @@ class Interpretacion(NamedTuple):
     plan: PlanConsulta | None = None
     # Una compra que el usuario está pensando. No se guarda: se analiza.
     compra: CompraHipotetica | None = None
+    # Cuotas contra contado. Tampoco se guarda: se compara.
+    financiacion: Financiacion | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
     alerta: Alerta | None = None
@@ -266,6 +291,22 @@ FECHA
   "el 3" (el día 3 del mes en curso, o del mes pasado si todavía no llegó).
 - Si el mensaje no menciona fecha, usá la fecha de hoy.
 - Nunca devuelvas una fecha futura.
+
+COMERCIO, CANTIDAD Y PRECIO POR UNIDAD
+Estos tres campos sirven para seguir cómo cambian los precios en el tiempo.
+Los tres son OPCIONALES y van en null si el mensaje no los dice. Inventarlos
+arruinaría justamente la medición que habilitan.
+
+- comercio: DÓNDE compró, si lo nombra. "en el coto" -> "coto", "cargué en la
+  Shell" -> "shell", "pagué Edesur" -> "edesur". Es el nombre del lugar o de
+  la empresa, no el rubro: "supermercado" es categoria, "coto" es comercio.
+  Si dice "el chino" o "el kiosco de la esquina", eso alcanza como comercio.
+- cantidad y unidad: cuánto compró, cuando lo aclara. "20 litros" ->
+  cantidad=20, unidad="litros". "2 kg de asado" -> cantidad=2, unidad="kg".
+  "12 cuotas" NO es esto: eso es una financiación.
+- precio_unitario: cuánto sale CADA unidad, si lo dice. "a $1.300 el litro"
+  -> 1300. Si dice el total y la cantidad ("20 litros por 26 mil"), dejalo en
+  null: el sistema divide solo.
 
 CATEGORIA
 - Una o dos palabras, en minúsculas, sin tildes ni signos.
@@ -429,6 +470,35 @@ intencion="crear_alerta" con umbral=null: el sistema pregunta.
 
 Si pide VER las alertas que tiene ("qué alertas tengo", "mostrame mis
 alertas"), poné intencion="ver_alertas" y dejá todo lo demás en null.
+
+=================== SI PREGUNTA POR CUOTAS CONTRA CONTADO ================
+Poné intencion="comparar_cuotas" y completá "financiacion". El resto en null.
+
+Es cuando hay DOS formas de pagar la misma cosa y quiere saber cuál conviene:
+  "¿me conviene el celu en 12 cuotas de 100 mil o 900 mil al contado?"
+  "¿pago las zapatillas en 6 cuotas de 40 mil o 200 mil de una?"
+  "12 cuotas sin interés de 50 mil, o 550 mil contado, ¿qué hago?"
+
+No lo confundas con simular_compra: ahí pregunta SI comprar, acá ya decidió
+comprar y pregunta CÓMO pagar.
+
+CAMPOS
+- cuotas: cuántas.
+- monto_cuota: cuánto sale CADA cuota. Si dice el total financiado en vez de
+  la cuota ("12 cuotas, 1.200.000 en total"), poné ese número en
+  total_financiado y dejá monto_cuota en null: el sistema divide.
+- precio_contado: el precio pagando todo junto.
+- moneda: como siempre, ARS si no se aclara.
+- que: qué es, corto ("el celu", "unas zapatillas").
+- tasa_mensual_pct: SOLO si el usuario dice a cuánto rinde su plata
+  ("si gano 4% por mes" -> 4). Si no lo dice, null: el sistema consulta la
+  tasa de plazo fijo. NUNCA la inventes.
+
+FALTAN DATOS
+Si falta la cantidad de cuotas, el monto de la cuota o el precio de contado,
+igual poné intencion="comparar_cuotas" con lo que tengas y el resto en null.
+El sistema pregunta lo que falte. No lo completes con un número inventado ni
+supongas que "sin interés" significa que el contado vale lo mismo.
 
 ================ SI ESTÁ PENSANDO UNA COMPRA QUE NO HIZO ================
 Poné intencion="simular_compra" y completá "compra". El resto en null.
@@ -623,6 +693,7 @@ def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
             # que no se muestra en ninguna respuesta.
             descripcion=descripcion or categoria,
             cuenta=_normalizar_cuenta(extraido.cuenta),
+            **_datos_de_precio(extraido, monto),
         )
     except ValidationError as exc:
         # Típicamente: monto <= 0 o categoria vacía.
@@ -636,6 +707,47 @@ _ETIQUETA_FALTANTE = {
     "cantidad": "cuántas unidades compraste",
     "precio_compra": "a qué precio por unidad",
 }
+
+
+def _datos_de_precio(extraido, monto: Decimal) -> dict:
+    """Comercio, cantidad, unidad y precio unitario, ya normalizados.
+
+    Si vino la cantidad pero no el precio por unidad, se divide: es la cuenta
+    que el usuario no hizo pero cuyos dos términos sí dio. Al revés no se
+    multiplica, porque el total ya lo tenemos y sería redundarlo.
+    """
+    comercio = " ".join((getattr(extraido, "comercio", None) or "").split()).lower()[:60]
+    unidad = " ".join((getattr(extraido, "unidad", None) or "").split()).lower()[:20]
+
+    cantidad = None
+    crudo = getattr(extraido, "cantidad", None)
+    if crudo is not None:
+        try:
+            candidata = _decimal_limpio(crudo)
+            if candidata > 0:
+                cantidad = candidata
+        except (InvalidOperation, ValueError):
+            pass
+
+    unitario = None
+    crudo = getattr(extraido, "precio_unitario", None)
+    if crudo is not None:
+        try:
+            candidato = _decimal_limpio(crudo)
+            if candidato > 0:
+                unitario = candidato
+        except (InvalidOperation, ValueError):
+            pass
+
+    if unitario is None and cantidad and cantidad > 0:
+        unitario = (monto / cantidad).quantize(Decimal("0.01"))
+
+    return {
+        "comercio": comercio or None,
+        "cantidad": cantidad,
+        "unidad": unidad or None,
+        "precio_unitario": unitario,
+    }
 
 
 def _decimal_limpio(valor: float) -> Decimal:
@@ -782,6 +894,64 @@ def _a_movimientos(
             dudas.append((cita, "no me quedó claro, ¿me lo repetís?"))
 
     return completos, tuple(dudas)
+
+
+def _a_financiacion(
+    extraida: _FinanciacionExtraida | None,
+) -> tuple[Financiacion | None, tuple[str, ...]]:
+    """(financiacion, faltantes). Con faltantes, la financiación es None.
+
+    Se prefiere preguntar antes que suponer: dar por hecho que "sin interés"
+    significa que el contado vale lo mismo cambiaría la respuesta entera.
+    """
+    if extraida is None:
+        return None, ("cuotas", "monto_cuota", "precio_contado")
+
+    cuotas = extraida.cuotas if (extraida.cuotas or 0) > 0 else None
+
+    # La cuota puede venir directa o deducirse del total financiado.
+    monto_cuota = extraida.monto_cuota
+    if (monto_cuota is None or monto_cuota <= 0) and extraida.total_financiado and cuotas:
+        monto_cuota = extraida.total_financiado / cuotas
+
+    contado = extraida.precio_contado
+
+    faltantes = []
+    if cuotas is None:
+        faltantes.append("cuotas")
+    if monto_cuota is None or monto_cuota <= 0:
+        faltantes.append("monto_cuota")
+    if contado is None or contado <= 0:
+        faltantes.append("precio_contado")
+    if faltantes:
+        return None, tuple(faltantes)
+
+    tasa = None
+    if extraida.tasa_mensual_pct is not None:
+        try:
+            candidata = _decimal_limpio(extraida.tasa_mensual_pct) / 100
+            # 0 < tasa < 1 (es decir, menos de 100% mensual). Fuera de ahí, se
+            # descarta y se usa la del mercado: es más probable un error de
+            # lectura que alguien ganando 200% por mes.
+            if Decimal("0") < candidata < Decimal("1"):
+                tasa = candidata
+        except (InvalidOperation, ValueError):
+            pass
+
+    try:
+        financiacion = Financiacion(
+            cuotas=cuotas,
+            monto_cuota=_decimal_limpio(monto_cuota),
+            precio_contado=_decimal_limpio(contado),
+            moneda=extraida.moneda or Moneda.ARS,
+            que=" ".join((extraida.que or "").split())[:60] or None,
+            tasa_mensual=tasa,
+        )
+    except (ValidationError, InvalidOperation, ValueError) as exc:
+        logger.info("Financiación inválida: %s", exc)
+        return None, ("cuotas", "monto_cuota", "precio_contado")
+
+    return financiacion, ()
 
 
 def _a_compra(extraida: _CompraExtraida | None) -> CompraHipotetica | None:
@@ -962,6 +1132,14 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
 
     if extraida.intencion is Intencion.VER_ALERTAS:
         return Interpretacion(intencion=Intencion.VER_ALERTAS)
+
+    if extraida.intencion is Intencion.COMPARAR_CUOTAS:
+        financiacion, faltantes = _a_financiacion(extraida.financiacion)
+        return Interpretacion(
+            intencion=Intencion.COMPARAR_CUOTAS,
+            financiacion=financiacion,
+            faltantes=faltantes,
+        )
 
     if extraida.intencion is Intencion.SIMULAR_COMPRA:
         compra = _a_compra(extraida.compra)
