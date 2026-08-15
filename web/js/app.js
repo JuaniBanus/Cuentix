@@ -11,7 +11,15 @@ import {
   traerMovimientos,
   traerObjetivos,
   traerPeriodo,
+  traerRetos,
 } from "./data.js";
+import { borrar as borrarFoto, subir as subirFoto } from "./fotos.js";
+import {
+  agregados as agregadosDelMes,
+  generarYGuardar,
+  traerNarrativas,
+  ultimoMesCerrado,
+} from "./narrativa.js";
 import { resumenDeTasas, traerCotizaciones } from "./cotizaciones.js";
 import { esqueletoPantalla } from "./esqueleto.js";
 import { estado, reiniciarEstado } from "./estado.js";
@@ -61,6 +69,8 @@ async function arrancar() {
       recargarInversiones: cargarInversiones,
       verHistorico,
       analizarGastos,
+      generarNarrativa,
+      verNarrativaDe,
     },
   });
   montarSelectorPeriodo({
@@ -114,7 +124,7 @@ async function cargarDatos() {
     // Las dos consultas salen juntas: la comparación contra el período anterior
     // la necesita Gastos, y pedirla recién al entrar a esa pantalla dejaría un
     // hueco de carga cada vez que se toca la tab.
-    const [actuales, previos, ahorros, objetivos, gastos] = await Promise.all([
+    const [actuales, previos, ahorros, objetivos, gastos, narrativas, retos] = await Promise.all([
       traerPeriodo(estado.periodo),
       traerPeriodo(anterior(estado.periodo)),
       // Sin acotar por fecha: la evolución del ahorro se lee sobre la historia
@@ -124,12 +134,18 @@ async function cargarDatos() {
       // Tampoco se acota: el termómetro compara el precio de un ítem entre
       // meses distintos, y con el mes elegido no vería ninguna variación.
       traerMovimientos({ tipo: "gasto" }),
+      // Las dos son de solo lectura y chicas; entran en la misma tanda para
+      // no agregar esperas al pintado inicial.
+      traerNarrativas().catch(() => []),
+      traerRetos().catch(() => []),
     ]);
 
     estado.movimientos = actuales;
     estado.movimientosPrevios = previos;
     estado.historialAhorros = ahorros;
     estado.historialGastos = gastos;
+    estado.narrativas = narrativas;
+    estado.retos = retos;
 
     // La serie del dólar no se espera: es de terceros y solo la usa una
     // sección. Cuando llega, se repinta. Si falla, el patrimonio se muestra
@@ -165,6 +181,45 @@ async function cargarDatos() {
 }
 
 // --------------------------------------------------------------------------
+// Narrativa mensual
+// --------------------------------------------------------------------------
+
+/**
+ * Pide el resumen del último mes cerrado y lo guarda.
+ *
+ * A pedido y no automático: cuesta una llamada a Gemini, y dispararla al
+ * arrancar la gastaría aunque nadie la mire.
+ */
+async function generarNarrativa() {
+  const mes = ultimoMesCerrado();
+  estado.narrativaCargando = true;
+  estado.errorNarrativa = null;
+  pintar();
+
+  try {
+    const datos = agregadosDelMes(
+      estado.historialGastos.concat(estado.historialAhorros ?? []),
+      estado.objetivos,
+      mes,
+      estado.moneda
+    );
+    await generarYGuardar(datos, mes);
+    estado.narrativas = await traerNarrativas();
+    estado.mesAbierto = mes;
+  } catch (problema) {
+    estado.errorNarrativa = problema.message;
+  } finally {
+    estado.narrativaCargando = false;
+    pintar();
+  }
+}
+
+function verNarrativaDe(mes) {
+  estado.mesAbierto = mes;
+  pintar();
+}
+
+// --------------------------------------------------------------------------
 // Objetivos: la única parte de la app que escribe
 // --------------------------------------------------------------------------
 
@@ -183,7 +238,7 @@ function revisar(datos) {
   return null;
 }
 
-async function guardarObjetivo(datos) {
+async function guardarObjetivo(datos, foto = {}) {
   const problema = revisar(datos);
   if (problema) {
     estado.errorObjetivo = problema;
@@ -197,8 +252,27 @@ async function guardarObjetivo(datos) {
 
   try {
     // El id sale de la vista: "nuevo" es alta, cualquier otra cosa es edición.
-    if (estado.vistaObjetivo === "nuevo") await crearObjetivo(datos);
-    else await editarObjetivo(estado.vistaObjetivo, datos);
+    if (estado.vistaObjetivo === "nuevo") {
+      // La foto va DESPUÉS de crear: su nombre lleva el id del objetivo, que
+      // recién existe cuando Postgres lo devuelve.
+      const creado = await crearObjetivo(datos);
+      if (foto.archivo && creado?.id) {
+        const ruta = await subirFoto(foto.archivo, creado.id);
+        await editarObjetivo(creado.id, { foto_path: ruta });
+      }
+    } else {
+      const cambios = { ...datos };
+      if (foto.archivo) {
+        cambios.foto_path = await subirFoto(foto.archivo, estado.vistaObjetivo);
+      } else if (foto.quitar) {
+        cambios.foto_path = null;
+      }
+      await editarObjetivo(estado.vistaObjetivo, cambios);
+      // La anterior se borra recién cuando la fila ya no la referencia: al
+      // revés, un fallo al guardar dejaría la fila apuntando a un archivo
+      // que ya no existe.
+      if ((foto.archivo || foto.quitar) && foto.anterior) await borrarFoto(foto.anterior);
+    }
 
     // Se relee en vez de parchear la lista en memoria: así se ven los defaults
     // que puso Postgres y no queda una copia que discrepa de la base.

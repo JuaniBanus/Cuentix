@@ -35,6 +35,7 @@ TABLA_OBJETIVOS = "objetivos"
 TABLA_INVERSIONES = "inversiones"
 TABLA_ALERTAS = "alertas"
 TABLA_RECORDATORIOS = "recordatorios"
+TABLA_RETOS = "retos"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -726,6 +727,106 @@ def movimientos_para_termometro(*, desde: date | None = None) -> list[dict]:
     except Exception:
         logger.warning("No pude leer los movimientos del termómetro", exc_info=True)
         return []
+
+
+# --------------------------------------------------------------------------
+# Retos de ahorro
+# --------------------------------------------------------------------------
+
+
+def reto_activo(chat_id: int) -> dict | None:
+    """El reto abierto de ese chat, si hay uno."""
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA_RETOS)
+            .select("*")
+            .eq("chat_id", chat_id)
+            .eq("estado", "activo")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        return filas[0] if filas else None
+    except Exception:
+        logger.warning("No pude leer el reto activo de %s", chat_id, exc_info=True)
+        return None
+
+
+def crear_reto(
+    chat_id: int, *, categoria: str, ahorro_estimado, moneda: str,
+    desde: date, hasta: date,
+) -> dict:
+    """Abre un reto. El user_id va si está configurado, para que lo vea la web."""
+    fila = {
+        "chat_id": chat_id,
+        "categoria": categoria,
+        "tipo": "sin_gastos",
+        "ahorro_estimado": str(ahorro_estimado),
+        "moneda": moneda,
+        "desde": desde.isoformat(),
+        "hasta": hasta.isoformat(),
+        "estado": "activo",
+    }
+    if SUPABASE_USER_ID:
+        fila["user_id"] = SUPABASE_USER_ID
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_RETOS).insert(fila).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude crear el reto: {detalle}") from exc
+    except Exception as exc:
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El insert del reto no devolvió la fila.")
+    return respuesta.data[0]
+
+
+def cerrar_reto(reto_id: str, estado: str, gastado) -> None:
+    """Marca el reto como cumplido, fallido o abandonado."""
+    try:
+        (
+            _obtener_cliente()
+            .table(TABLA_RETOS)
+            .update({
+                "estado": estado,
+                "cerrado_en": datetime.now(timezone.utc).isoformat(),
+                "gastado": str(gastado),
+            })
+            .eq("id", reto_id)
+            .execute()
+        )
+    except Exception:
+        logger.warning("No pude cerrar el reto %s", reto_id, exc_info=True)
+
+
+def gastado_en_reto(reto: dict) -> Decimal:
+    """Cuánto se gastó del rubro del reto dentro de su ventana."""
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA)
+            .select("monto")
+            .eq("tipo", TipoMovimiento.GASTO.value)
+            .eq("categoria", reto["categoria"])
+            .eq("moneda", reto.get("moneda", "ARS"))
+            .gte("fecha", reto["desde"])
+            .lte("fecha", reto["hasta"])
+            .execute()
+        ).data or []
+    except Exception:
+        logger.warning("No pude sumar el gasto del reto", exc_info=True)
+        return Decimal("0")
+
+    total = Decimal("0")
+    for fila in filas:
+        try:
+            total += Decimal(str(fila["monto"]))
+        except Exception:
+            continue
+    return total
 
 
 def obtener_inversiones(*, limite: int = 100) -> list[dict]:

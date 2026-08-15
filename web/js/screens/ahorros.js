@@ -7,6 +7,7 @@
 // pantallas; la línea dice explícitamente que es todo el historial.
 
 import { renderPatrimonio } from "./patrimonio.js";
+import { renderRetos } from "./retos.js";
 import { porMoneda, serieAcumulada, totalesPorCuenta, totalPorTipo } from "../cuentas.js";
 import { colorDeCategoria } from "../donut.js";
 import { cotizacionActual, esc, monto, montosOcultos, verEnDolares } from "../format.js";
@@ -68,6 +69,7 @@ export function renderAhorros(contenedor, ctx) {
   // El patrimonio va al final de esta pantalla y se dibuja después de que la
   // vista principal escribió su innerHTML, porque si no lo borraría.
   const alFinal = () => {
+    renderRetos(contenedor, { retos: ctx.retos, moneda, hoy: ctx.hoy });
     if (historialAhorros?.length || ctx.inversiones?.length) {
       renderPatrimonio(contenedor, {
         ahorros: historialAhorros,

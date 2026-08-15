@@ -222,6 +222,19 @@ function traducirErrorDeInversiones(error) {
 
 const OBJETIVOS = "objetivos";
 
+/** Los retos del usuario, del más nuevo al más viejo. La web solo LEE: los
+ *  propone, acepta y cierra el bot, que es donde el usuario está cuando
+ *  registra el gasto que los rompe. */
+export async function traerRetos() {
+  const { data, error } = await sb
+    .from("retos")
+    .select("id, categoria, tipo, objetivo, ahorro_estimado, moneda, desde, hasta, estado, gastado")
+    .order("created_at", { ascending: false })
+    .limit(30);
+  if (error) throw new Error(traducirErrorDeDatos(error));
+  return data ?? [];
+}
+
 export async function traerObjetivos() {
   const { data } = await pedir(
     () => sb.from(OBJETIVOS).select("*").order("created_at", { ascending: false }),

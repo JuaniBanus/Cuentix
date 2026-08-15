@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
@@ -38,14 +39,31 @@ from app.sesion_web import cerrar_cliente as cerrar_cliente_sesion
 from app.sesion_web import verificar as verificar_sesion
 from app.inflacion import detectar_salto
 from app.items import clave_para
+from app.narrativa import AgregadosMes, NarrativaError
+from app.narrativa import generar as generar_narrativa
 from app.recurrentes import detectar as detectar_recurrentes
 from app.recurrentes import redactar as redactar_recurrentes
+from app.retos import DURACION_DIAS as DURACION_RETO
+from app.retos import (
+    proponer as proponer_reto,
+    revisar as revisar_reto,
+    texto_activo,
+    texto_aceptado,
+    texto_cumplido,
+    texto_fallido,
+    texto_propuesta,
+    texto_sin_propuesta,
+)
 from app.db import (
     DBError,
     Total,
     balance,
+    cerrar_reto,
     claves_de_items,
     crear_objetivo,
+    crear_reto,
+    gastado_en_reto,
+    reto_activo,
     historial_de_item,
     movimientos_para_termometro,
     guardar_inversion,
@@ -228,6 +246,34 @@ async def revisar_alertas(secret: str) -> dict:
     return await revisar_alertas_de_precio()
 
 
+@app.post("/narrativa")
+async def escribir_narrativa(
+    datos: AgregadosMes,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict[str, str]:
+    """Redacta el resumen del mes a partir de agregados.
+
+    Mismo contrato que /insights: recibe NÚMEROS ya calculados por la web, no
+    movimientos. Acá no se lee la base ni se sabe de quién son los datos; el
+    token solo prueba que quien llama es un usuario y no cualquiera gastando
+    nuestra cuota de Gemini.
+
+    El texto no se guarda desde acá: lo guarda la web en `narrativas`, que es
+    donde RLS puede atarlo a su dueño.
+    """
+    try:
+        await verificar_sesion(authorization)
+    except SesionInvalida as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    try:
+        texto = await run_in_threadpool(generar_narrativa, datos)
+    except NarrativaError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return {"texto": texto}
+
+
 @app.post("/tareas/recordatorios/{secret}")
 async def disparar_recordatorios(secret: str) -> dict:
     """Manda el recordatorio diario a quien le toque en esta hora.
@@ -377,6 +423,11 @@ async def procesar_update(update: Any) -> None:
     # /recordatorio necesita leer y escribir en la base, así que no puede vivir
     # en comandos.py, que es solo texto fijo. Pero sí va antes del parser: es
     # un comando, no algo que haya que interpretar.
+    if _es_comando_reto(texto):
+        logger.info("Comando de reto de %s: %r", chat_id, texto)
+        await _responder(chat_id, await run_in_threadpool(_atender_reto, chat_id, texto))
+        return
+
     if _es_comando_recurrentes(texto):
         logger.info("Comando de recurrentes de %s", chat_id)
         await _responder(chat_id, await run_in_threadpool(_texto_recurrentes))
@@ -424,9 +475,12 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
         # El aviso se busca ANTES de guardar: si no, la compra recién hecha
         # entraría en su propio historial y se compararía contra sí misma.
         aviso = await run_in_threadpool(_aviso_de_salto, movimiento)
+        # También antes de guardar: el aviso suma el movimiento nuevo a mano,
+        # y si ya estuviera en la base lo contaría dos veces.
+        aviso_reto = await run_in_threadpool(_aviso_de_reto, movimiento, chat_id)
         movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
-        return _confirmacion(movimiento) + aviso
+        return _confirmacion(movimiento) + aviso + aviso_reto
 
     if intencion is Intencion.REGISTRAR_VARIOS:
         return await _resolver_varios(interpretacion)
@@ -634,6 +688,84 @@ def _resolver_plan(plan: PlanConsulta | None) -> str:
         ejecutar_plan(plan, plan.comparar_con) if plan.comparar_con else None
     )
     return redactar_plan(plan, resultado, _formatear_monto, comparacion)
+
+
+_COMANDOS_RETO = frozenset({"/reto", "/retos", "/desafio", "/acepto"})
+
+
+def _es_comando_reto(texto: str) -> bool:
+    return (texto or "").strip().lower().split("@", 1)[0] in _COMANDOS_RETO
+
+
+def _atender_reto(chat_id: int, texto: str) -> str:
+    """Propone, acepta o informa el reto. Todo en un comando por simplicidad.
+
+    Antes que nada revisa el reto abierto: si ya se cerró —por gasto o por
+    fecha— hay que decirlo ahí, no dejar que el usuario descubra semanas
+    después que lo perdió.
+    """
+    comando = texto.strip().lower().split("@", 1)[0]
+
+    abierto = reto_activo(chat_id)
+    if abierto:
+        gastado = gastado_en_reto(abierto)
+        nuevo = revisar_reto(abierto, gastado)
+        if nuevo:
+            cerrar_reto(abierto["id"], nuevo, gastado)
+            if nuevo == "cumplido":
+                return texto_cumplido(abierto, _formatear_monto, Moneda(abierto.get("moneda", "ARS")))
+            return texto_fallido(abierto, gastado, _formatear_monto, Moneda(abierto.get("moneda", "ARS")))
+        # Sigue abierto: no se propone otro encima.
+        return texto_activo(abierto, gastado, _formatear_monto, Moneda(abierto.get("moneda", "ARS")))
+
+    filas = movimientos_para_termometro()
+    conteo: dict[str, int] = {}
+    for fila in filas:
+        conteo[fila.get("moneda", "ARS")] = conteo.get(fila.get("moneda", "ARS"), 0) + 1
+    moneda = Moneda(max(conteo, key=conteo.get)) if conteo else Moneda.ARS
+
+    propuesta = proponer_reto(filas, moneda.value)
+    if propuesta is None:
+        return texto_sin_propuesta()
+
+    # /acepto crea; /reto solo muestra. Así aceptar es un acto explícito y no
+    # algo que pasa por escribir una palabra.
+    if comando != "/acepto":
+        return texto_propuesta(propuesta, _formatear_monto, moneda)
+
+    hoy = date.today()
+    try:
+        reto = crear_reto(
+            chat_id,
+            categoria=propuesta.categoria,
+            ahorro_estimado=propuesta.ahorro_estimado,
+            moneda=moneda.value,
+            desde=hoy,
+            hasta=hoy + timedelta(days=DURACION_RETO),
+        )
+    except DBError as exc:
+        logger.error("No pude crear el reto: %s", exc)
+        return "No pude arrancar el reto 😬 Probá de nuevo en un ratito."
+
+    return texto_aceptado(reto, _formatear_monto, moneda)
+
+
+def _aviso_de_reto(movimiento: Movimiento, chat_id: int) -> str:
+    """Si el gasto rompe un reto activo, se dice al confirmarlo."""
+    if movimiento.tipo is not TipoMovimiento.GASTO:
+        return ""
+
+    abierto = reto_activo(chat_id)
+    if not abierto or abierto.get("categoria") != movimiento.categoria:
+        return ""
+
+    gastado = gastado_en_reto(abierto) + movimiento.monto
+    nuevo = revisar_reto(abierto, gastado)
+    if nuevo != "fallido":
+        return ""
+
+    cerrar_reto(abierto["id"], "fallido", gastado)
+    return f"\n\n💔 Ahí se cortó el reto de {abierto['categoria']}. Si querés otro: /reto"
 
 
 _COMANDOS_RECURRENTES = frozenset({
