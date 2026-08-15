@@ -991,6 +991,66 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 
+/* -------------------------------------------------------------- Narrativa */
+
+.narrativa { display: flex; flex-direction: column; gap: 6px; }
+.narrativa-mes {
+  font-size: 12px; color: var(--tenue-2);
+  text-transform: capitalize; letter-spacing: .01em;
+}
+/* Un poco más de aire y de altura de línea que el resto: es el único bloque
+   de la app que se lee como texto corrido y no como dato. */
+.narrativa-texto { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 10px; }
+.narrativa-texto p { font-size: 14.5px; line-height: 1.65; }
+
+.narrativa-anteriores { margin-top: 6px; }
+.narrativa-anteriores summary {
+  font-size: 13px; color: var(--tenue); cursor: pointer; padding: 6px 0;
+}
+.narrativa-lista { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.narrativa-link {
+  background: none; border: 0; padding: 6px 0;
+  color: var(--acento-claro); font-size: 13.5px; text-align: left;
+  text-transform: capitalize;
+}
+
+/* ------------------------------------------------------------------ Retos */
+
+.reto-activo { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+.reto-nombre { font-size: 15px; font-weight: 500; }
+.reto-logros { margin-top: 8px; }
+
+/* ----------------------------------------------------- Foto en objetivos */
+
+.foto-campo { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.foto-acciones { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.foto-boton { width: auto; text-align: center; cursor: pointer; padding: 8px 14px; }
+
+.foto-vista {
+  flex: 0 0 auto;
+  width: 84px; height: 84px;
+  border-radius: var(--r-boton);
+  border: 1px solid var(--borde);
+  background-size: cover; background-position: center;
+  background-color: var(--superficie);
+}
+/* Sin foto, un marco punteado en vez de un cuadrado vacío: se lee como "acá
+   va algo" y no como un error de carga. */
+.foto-vista.es-vacia { border-style: dashed; border-color: var(--borde-fuerte); }
+
+/* La foto en la tarjeta va de fondo, detrás del contenido, con un velo que
+   garantiza que el texto se siga leyendo por clara que sea la imagen. */
+.objetivo.tiene-foto { position: relative; overflow: hidden; isolation: isolate; }
+.objetivo-foto {
+  position: absolute; inset: 0; z-index: -1;
+  background-size: cover; background-position: center;
+  opacity: .22;
+}
+.objetivo.tiene-foto::after {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(to right, var(--superficie) 30%, transparent);
+}
+
 /* ------------------------------------------------------------------- Tabs */
 
 .tabs {

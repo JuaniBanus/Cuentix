@@ -107,6 +107,13 @@ export function pintar(conEntrada = false) {
     historialAhorros: estado.historialAhorros,
     historialGastos: estado.historialGastos,
     serieDolar: estado.serieDolar,
+    narrativas: estado.narrativas,
+    narrativaCargando: estado.narrativaCargando,
+    errorNarrativa: estado.errorNarrativa,
+    mesAbierto: estado.mesAbierto,
+    retos: estado.retos,
+    generarNarrativa: acciones.generarNarrativa,
+    verNarrativaDe: acciones.verNarrativaDe,
     // La fecha de hoy la pone el router y no cada pantalla: así todas las
     // secciones del mismo pintado usan la misma, y los tests la pueden fijar.
     hoy: new Date().toISOString().slice(0, 10),

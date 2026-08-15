@@ -6,7 +6,9 @@ import { renderDona } from "../donut.js";
 import { esc, monto, montosOcultos } from "../format.js";
 import { renderGauge } from "../gauge.js";
 import { bandaDe, calcularSalud, explicar } from "../salud.js";
+import { ultimoMesCerrado } from "../narrativa.js";
 import { acotar, chipsMoneda, engancharMonedas, listaMovimientos } from "./comunes.js";
+import { renderNarrativa } from "./narrativa.js";
 
 // --------------------------------------------------------------------------
 // Salud financiera
@@ -87,6 +89,18 @@ function tarjetaSalud(ctx, salud) {
 
 export function renderInicio(contenedor, ctx) {
   const { movimientos, moneda, monedas, setMoneda, periodo } = ctx;
+  // La narrativa se antepone al final del render, con prepend: escribirla acá
+  // arriba no serviría porque el innerHTML de más abajo la borraría.
+  const alPrincipio = () =>
+    renderNarrativa(contenedor, {
+      narrativas: ctx.narrativas,
+      mesCerrado: ultimoMesCerrado(),
+      cargando: ctx.narrativaCargando,
+      error: ctx.errorNarrativa,
+      mesAbierto: ctx.mesAbierto,
+      generar: ctx.generarNarrativa,
+      verMes: ctx.verNarrativaDe,
+    });
   const delPeriodo = porMoneda(movimientos)[moneda] ?? [];
 
   const ingresos = totalPorTipo(delPeriodo, "ingreso");
@@ -162,4 +176,5 @@ export function renderInicio(contenedor, ctx) {
   }
 
   engancharMonedas(contenedor, setMoneda);
+  alPrincipio();
 }

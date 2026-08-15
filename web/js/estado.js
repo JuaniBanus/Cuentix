@@ -26,6 +26,16 @@ export const estado = {
   // Serie histórica del dólar oficial, para valuar el patrimonio de cada mes
   // a la cotización de ESE mes. null = no llegó o no se pudo traer.
   serieDolar: null,
+
+  // Narrativa mensual. `narrativas` son las ya guardadas; `mesAbierto` es cuál
+  // se está leyendo (null = la del último mes cerrado).
+  narrativas: [],
+  narrativaCargando: false,
+  errorNarrativa: null,
+  mesAbierto: null,
+
+  // Retos de ahorro. La web solo los muestra.
+  retos: [],
   // La cotización la guarda format.js, que es quien convierte. Acá solo queda
   // si el pedido falló, para poder avisarlo en pantalla.
   falloCotizacion: false,
@@ -89,6 +99,11 @@ export function reiniciarEstado() {
   estado.historialAhorros = [];
   estado.historialGastos = [];
   estado.serieDolar = null;
+  estado.narrativas = [];
+  estado.narrativaCargando = false;
+  estado.errorNarrativa = null;
+  estado.mesAbierto = null;
+  estado.retos = [];
   estado.inversiones = null;
   estado.errorInversiones = null;
   estado.precios = {};
