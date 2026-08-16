@@ -132,7 +132,7 @@ export function renderAhorros(contenedor, ctx) {
         <p class="apunte tarjeta-pie">Llevás ${monto(acumulado, moneda)} ahorrados en total.</p>
       </section>` : ""}
 
-    <section class="bloque">
+    <section class="bloque bloque-detalle">
       <h2 class="tarjeta-titulo">Detalle de ${esc(periodo.etiqueta)}</h2>
       ${delPeriodo.length
         ? listaMovimientos(delPeriodo)

@@ -1809,11 +1809,36 @@ button { font: inherit; color: inherit; cursor: pointer; }
   /* La fila va escrita en todos, no solo la columna: el orden del DOM es
      balance, salud, dona, mini-tarjetas, recientes, así que dejar que la fila
      se resuelva sola mete a salud arriba de la dona y abre dos huecos. */
-  [data-pantalla="inicio"] > .bloque:first-child { grid-column: 1; grid-row: 1; }
-  [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 1; }
-  [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 2; }
-  [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 3; }
-  [data-pantalla="inicio"] > .bloque:last-child { grid-column: 2; grid-row: 3; }
+  /* La narrativa se antepone al resto, así que corrió una fila a todo lo
+     demás. Va a lo ancho arriba de todo: es texto corrido y en una columna de
+     600px se lee bien; partida al medio de la grilla quedaría una columna de
+     prosa flaca al lado de una cifra.
+
+     El balance se ubica por CLASE y no por `:first-child`. Ese selector se
+     rompió en cuanto la narrativa pasó a ser el primer hijo: dejó de matchear
+     y la tarjeta caía al fondo de la página por autoposicionamiento. Una
+     posición de grilla no puede depender del orden del DOM cuando hay bloques
+     que aparecen y desaparecen según los datos. */
+  [data-pantalla="inicio"] > .narrativa { grid-column: 1 / -1; grid-row: 1; }
+  [data-pantalla="inicio"] > .bloque-heroe { grid-column: 1; grid-row: 2; }
+  [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 2; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 3; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 4; }
+  [data-pantalla="inicio"] > .bloque:last-child { grid-column: 2; grid-row: 4; }
+
+  /* Recientes al lado de Salud financiera, que es mucho más alta. La sección
+     se estira sola por la grilla, pero la LISTA de adentro se quedaba con su
+     alto natural y dejaba el recuadro cortado a media altura, con un vacío
+     debajo que rompía la simetría de la fila.
+
+     Con la sección en columna y la lista en flex:1, el recuadro llega hasta
+     abajo. Las filas conservan su alto —no se estiran para rellenar, que las
+     dejaría desparramadas— y el sobrante queda como aire dentro del bloque. */
+  [data-pantalla="inicio"] > .bloque:last-child {
+    display: flex;
+    flex-direction: column;
+  }
+  [data-pantalla="inicio"] > .bloque:last-child .movimientos { flex: 1; }
 
   /* Ingresos y Ahorrado son un rótulo y un número: unos 76px de alto. El balance
      de al lado lleva los chips de moneda, el rótulo, la cifra grande y el
@@ -1927,7 +1952,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > [aria-labelledby="titulo-lugares"] { grid-column: 1; }
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > [aria-labelledby="titulo-evolucion"] { grid-column: 1; }
-  [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .bloque:last-child { grid-column: 2; }
+  /* Por clase y no por `:last-child`, por el mismo motivo que el balance de
+     Inicio: los retos y el patrimonio se agregan al final de esta pantalla, y
+     el detalle dejó de ser el último hijo. El selector no matcheaba nada y el
+     bloque caía fuera de su columna. */
+  [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .bloque-detalle { grid-column: 2; }
+
+  /* Las dos secciones nuevas van a lo ancho, debajo de todo: retos es una
+     lista corta y el patrimonio lleva un gráfico que necesita ancho para que
+     la curva no se aplaste. */
+  [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .patrimonio { grid-column: 1 / -1; }
 
   /* ---------------------------------------------------------- Inversiones */
 
