@@ -14,9 +14,13 @@
      chiquito que lleva adentro tengan exactamente el mismo radio es lo que
      delata una plantilla: cuando alguien lo dibuja a mano, el radio acompaña al
      tamaño de la pieza. */
-  --r-panel: 22px;
-  --r-tarjeta: 18px;
-  --r-boton: 12px;
+  /* Radios de verdad grandes. 18px sobre una tarjeta de 340 de ancho es un
+     borde apenas matado: se ve "redondeado" solo si lo buscás. iOS usa 20 a
+     26 a esta escala, y ahí el redondeo pasa a ser una característica de la
+     forma en vez de un detalle. */
+  --r-panel: 28px;
+  --r-tarjeta: 22px;
+  --r-boton: 14px;
   --r-pastilla: 999px;
   /* Para piezas de 10 a 40px: avatares, puntos de leyenda, badges. Con
      --r-boton se veían demasiado redondas a ese tamaño. */
@@ -266,8 +270,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .contenido {
   max-width: var(--ancho);
   margin: 0 auto;
-  padding: 4px 18px calc(var(--alto-tabs) + 28px + env(safe-area-inset-bottom));
-  display: flex; flex-direction: column; gap: 18px;
+  /* Más aire: 22px de margen lateral y 24 entre bloques, contra 18 y 18.
+     El espaciado es la mitad de lo que hace que algo "se sienta Apple", y es
+     la mitad que nadie mira. Una interfaz apretada se lee como densa y
+     barata por más redondeos y vidrio que tenga encima. */
+  padding: 4px 22px calc(var(--alto-tabs) + 32px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 24px;
 }
 
 .bloque { display: flex; flex-direction: column; gap: 4px; }
@@ -283,21 +291,38 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 1px solid var(--borde);
   border-radius: var(--r-tarjeta);
   box-shadow: var(--luz-interna), var(--sombra);
-  padding: 18px;
+  /* 20 en vez de 18: con el radio en 22, un relleno chico deja el contenido
+     metiéndose en la curva de la esquina. El padding tiene que acompañar al
+     redondeo o la tarjeta se ve apretada. */
+  padding: 20px;
 }
 
-.pantalla-titulo { font-size: 26px; letter-spacing: -.025em; margin-bottom: 2px; }
+/* Large Title, el gesto más reconocible de iOS.
+   26px era un título discreto; 34 en negrita es una declaración. Es lo que
+   hace que la pantalla se lea como Ajustes de iPhone y no como una web con
+   un encabezado. El peso 700 no es capricho: SF y Inter recién a ese peso
+   dan el trazo grueso de los Large Title. */
+.pantalla-titulo {
+  font-size: clamp(30px, 8vw, 34px);
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.1;
+  margin: 6px 0 10px;
+}
 
 /* Dos niveles de rótulo, y son distintos a propósito. El título de tarjeta
    nombra un bloque y va en tinta plena: es un encabezado. La .etiqueta de más
    abajo rotula una cifra suelta y va en versalita apretada, que es el gesto que
    dice "esto es la unidad, el número es lo que importa". Los dos en gris del
    mismo tamaño —como estaban— dejaban la pantalla sin jerarquía. */
+/* Encabezado de sección estilo iOS: más chico, en gris y en versalita. En
+   Ajustes el título de un grupo no compite con su contenido, lo rotula. Que
+   estuviera en tinta plena y a 13.5 lo hacía pelear con las cifras de abajo. */
 .tarjeta-titulo {
-  font-size: 13.5px; font-weight: 500;
-  color: var(--texto);
-  letter-spacing: -.005em;
-  margin-bottom: 14px;
+  font-size: 12px; font-weight: 600;
+  color: var(--tenue);
+  letter-spacing: .04em; text-transform: uppercase;
+  margin-bottom: 12px;
 }
 /* Padding parejo en los cuatro lados. Antes eran 15 arriba y abajo contra 16 a
    los costados: un píxel que nadie ve de a una, pero puestas cuatro en fila se
@@ -322,10 +347,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
    angosto un balance de siete dígitos se salía de la pantalla. Crece con el
    ancho hasta 48 y ahí se planta, porque más grande deja de leerse como un
    número y pasa a ser un cartel. */
+/* La cifra grande crece y engorda. Es el dato que la persona vino a ver, y en
+   una app de Apple el dato principal ocupa el espacio que se merece. */
 .cifra-heroe {
-  font-size: clamp(36px, 10vw, 48px);
-  font-weight: 600; letter-spacing: -.035em;
-  line-height: 1.05; margin: 4px 0 3px;
+  font-size: clamp(42px, 12vw, 56px);
+  font-weight: 700; letter-spacing: -.04em;
+  line-height: 1.02; margin: 6px 0 4px;
 }
 .cifra-heroe.es-negativo { color: var(--acento-tinta); }
 .cifra-media { font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
@@ -1019,12 +1046,40 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ----------------------------------------------------------- Movimientos */
 
-.movimientos { display: flex; flex-direction: column; margin-top: 6px; }
+/* Lista agrupada, como Ajustes de iOS: las filas viven DENTRO de un contenedor
+   redondeado en vez de flotar sueltas sobre el fondo.
+
+   Es el cambio que más se nota de todo el rediseño, y no tiene nada de
+   efectista. Una lista de filas con línea abajo se lee como una tabla; la
+   misma lista metida en un bloque con esquinas redondas se lee como una
+   pieza, y esa es la diferencia entre "web" y "app nativa". */
+.movimientos {
+  display: flex; flex-direction: column;
+  margin-top: 10px;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--r-tarjeta);
+  /* Recorta las esquinas de la primera y la última fila sin tener que
+     redondearlas a mano. */
+  overflow: hidden;
+}
+
 .movimiento {
   display: grid; grid-template-columns: 34px 1fr auto;
   align-items: center; gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--borde);
+  /* Filas más altas y con sangría lateral: el aire de iOS. */
+  padding: 13px 14px;
+  border-bottom: var(--hairline) solid var(--borde);
+}
+/* El separador NO llega al borde: arranca donde arranca el texto, alineado
+   con el avatar. Ese detalle —la sangría del separador— es una de las firmas
+   visuales de las listas de iOS. */
+.movimiento:not(:last-child) {
+  background-image: linear-gradient(var(--borde), var(--borde));
+  background-size: calc(100% - 60px) var(--hairline);
+  background-position: 60px 100%;
+  background-repeat: no-repeat;
+  border-bottom: 0;
 }
 .movimiento:last-child { border-bottom: 0; }
 
