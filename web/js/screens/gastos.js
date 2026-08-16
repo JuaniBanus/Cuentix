@@ -14,7 +14,6 @@ import { renderLinea } from "../linea.js";
 import { anterior } from "../periodo.js";
 import { acotar, celdasDeBarra, chipsMoneda, engancharMonedas, listaMovimientos } from "./comunes.js";
 import { esEscritorio } from "../pantalla.js";
-import { renderDolar } from "./dolar.js";
 import { renderComparacion, renderRecurrentes } from "./recurrentes.js";
 import { renderTermometro } from "./termometro.js";
 
@@ -323,12 +322,4 @@ export function renderGastos(contenedor, ctx) {
       inflacionOficial: ctx.inflacionOficial ?? null,
     });
   }
-
-  // El dólar no depende de los movimientos del usuario, así que se dibuja
-  // aunque no haya historial cargado: es información útil desde el día uno.
-  renderDolar(contenedor, {
-    datos: ctx.dolar,
-    casaAbierta: ctx.casaDolar,
-    setCasa: ctx.setCasaDolar,
-  });
 }

@@ -6,6 +6,7 @@
 // nada. El total y el reparto sí respetan el período, como en todas las
 // pantallas; la línea dice explícitamente que es todo el historial.
 
+import { renderDolar } from "./dolar.js";
 import { renderPatrimonio } from "./patrimonio.js";
 import { renderRetos } from "./retos.js";
 import { porMoneda, serieAcumulada, totalesPorCuenta, totalPorTipo } from "../cuentas.js";
@@ -70,6 +71,18 @@ export function renderAhorros(contenedor, ctx) {
   // vista principal escribió su innerHTML, porque si no lo borraría.
   const alFinal = () => {
     renderRetos(contenedor, { retos: ctx.retos, moneda, hoy: ctx.hoy });
+
+    // El dólar vive acá y no en Gastos: quien mira esta pantalla está viendo
+    // en qué guarda la plata, y en Argentina esa pregunta y la del tipo de
+    // cambio son la misma. En Gastos era información suelta al pie.
+    //
+    // No depende de los movimientos del usuario, así que se dibuja aunque no
+    // haya nada cargado: sirve desde el día uno.
+    renderDolar(contenedor, {
+      datos: ctx.dolar,
+      casaAbierta: ctx.casaDolar,
+      setCasa: ctx.setCasaDolar,
+    });
     if (historialAhorros?.length || ctx.inversiones?.length) {
       renderPatrimonio(contenedor, {
         ahorros: historialAhorros,
