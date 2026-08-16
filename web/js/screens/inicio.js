@@ -89,9 +89,10 @@ function tarjetaSalud(ctx, salud) {
 
 export function renderInicio(contenedor, ctx) {
   const { movimientos, moneda, monedas, setMoneda, periodo } = ctx;
-  // La narrativa se antepone al final del render, con prepend: escribirla acá
-  // arriba no serviría porque el innerHTML de más abajo la borraría.
-  const alPrincipio = () =>
+  // La narrativa se agrega al cierre de la pantalla. Se define acá y se llama
+  // al final porque el innerHTML de más abajo borraría cualquier cosa que se
+  // escribiera antes.
+  const alFinal = () =>
     renderNarrativa(contenedor, {
       narrativas: ctx.narrativas,
       mesCerrado: ultimoMesCerrado(),
@@ -150,7 +151,7 @@ export function renderInicio(contenedor, ctx) {
       </section>
     </div>
 
-    <section class="bloque">
+    <section class="bloque bloque-recientes">
       <h2 class="tarjeta-titulo">Recientes</h2>
       ${recientes.length
         ? listaMovimientos(recientes)
@@ -176,5 +177,5 @@ export function renderInicio(contenedor, ctx) {
   }
 
   engancharMonedas(contenedor, setMoneda);
-  alPrincipio();
+  alFinal();
 }

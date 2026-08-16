@@ -1819,12 +1819,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
      y la tarjeta caía al fondo de la página por autoposicionamiento. Una
      posición de grilla no puede depender del orden del DOM cuando hay bloques
      que aparecen y desaparecen según los datos. */
-  [data-pantalla="inicio"] > .narrativa { grid-column: 1 / -1; grid-row: 1; }
-  [data-pantalla="inicio"] > .bloque-heroe { grid-column: 1; grid-row: 2; }
-  [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 2; }
-  [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 3; }
-  [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 4; }
-  [data-pantalla="inicio"] > .bloque:last-child { grid-column: 2; grid-row: 4; }
+  [data-pantalla="inicio"] > .bloque-heroe { grid-column: 1; grid-row: 1; }
+  [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 1; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 2; }
+  [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 3; }
+  [data-pantalla="inicio"] > .bloque-recientes { grid-column: 2; grid-row: 3; }
+  /* La narrativa cierra la pantalla, a lo ancho: es texto corrido y en media
+     columna quedaría una tira de prosa flaca al lado de una cifra. */
+  [data-pantalla="inicio"] > .narrativa { grid-column: 1 / -1; grid-row: 4; }
 
   /* Recientes al lado de Salud financiera, que es mucho más alta. La sección
      se estira sola por la grilla, pero la LISTA de adentro se quedaba con su
@@ -1834,11 +1836,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
      Con la sección en columna y la lista en flex:1, el recuadro llega hasta
      abajo. Las filas conservan su alto —no se estiran para rellenar, que las
      dejaría desparramadas— y el sobrante queda como aire dentro del bloque. */
-  [data-pantalla="inicio"] > .bloque:last-child {
+  [data-pantalla="inicio"] > .bloque-recientes {
     display: flex;
     flex-direction: column;
   }
-  [data-pantalla="inicio"] > .bloque:last-child .movimientos { flex: 1; }
+  [data-pantalla="inicio"] > .bloque-recientes .movimientos { flex: 1; }
 
   /* Ingresos y Ahorrado son un rótulo y un número: unos 76px de alto. El balance
      de al lado lleva los chips de moneda, el rótulo, la cifra grande y el
