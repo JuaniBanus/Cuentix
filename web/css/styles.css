@@ -2027,6 +2027,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
      lista corta y el patrimonio lleva un gráfico que necesita ancho para que
      la curva no se aplaste. */
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .patrimonio { grid-column: 1 / -1; }
+  /* El dólar también a lo ancho: lleva una tabla de siete filas con tres
+     columnas y un gráfico, y en media columna se apretaría. */
+  [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .dolar { grid-column: 1 / -1; }
 
   /* ---------------------------------------------------------- Inversiones */
 
