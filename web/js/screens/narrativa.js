@@ -1,4 +1,10 @@
-// La narrativa mensual, destacada arriba de Inicio.
+// La narrativa mensual, al final de Inicio.
+//
+// Va al cierre y no al principio: es lectura, no consulta. Quien abre la app
+// viene a ver el balance y los últimos movimientos, y un bloque de prosa
+// arriba de todo empuja esos datos abajo del pliegue. Al final funciona como
+// lo que es —un resumen para leer si hay ganas— sin estorbar a lo que se mira
+// diez veces por día.
 //
 // Muestra el resumen del último mes CERRADO, no del actual: un resumen de un
 // mes a la mitad describiría medio mes y cambiaría cada día. Los anteriores se
@@ -27,7 +33,7 @@ export function renderNarrativa(contenedor, ctx) {
     seccion.innerHTML = `
       <h2 class="tarjeta-titulo">✍️ Tu mes en palabras</h2>
       <p class="cargando">Escribiendo el resumen de ${esc(nombreDelMes(mesCerrado))}…</p>`;
-    contenedor.prepend(seccion);
+    contenedor.append(seccion);
     return;
   }
 
@@ -43,7 +49,7 @@ export function renderNarrativa(contenedor, ctx) {
       <button class="boton boton-acento" data-narrativa="generar">
         Escribir el resumen de ${esc(nombreDelMes(mesCerrado))}
       </button>`;
-    contenedor.prepend(seccion);
+    contenedor.append(seccion);
     engancharNarrativa(seccion, { generar, verMes });
     return;
   }
@@ -78,7 +84,7 @@ export function renderNarrativa(contenedor, ctx) {
       escribiste al cargar cada gasto.
     </p>`;
 
-  contenedor.prepend(seccion);
+  contenedor.append(seccion);
   engancharNarrativa(seccion, { generar, verMes });
 }
 
