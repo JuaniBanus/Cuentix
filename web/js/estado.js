@@ -36,6 +36,11 @@ export const estado = {
 
   // Retos de ahorro. La web solo los muestra.
   retos: [],
+
+  // Cotizaciones del dólar y su serie histórica. null = todavía no llegaron.
+  // `casaDolar` es cuál se está graficando.
+  dolar: null,
+  casaDolar: "oficial",
   // La cotización la guarda format.js, que es quien convierte. Acá solo queda
   // si el pedido falló, para poder avisarlo en pantalla.
   falloCotizacion: false,
@@ -104,6 +109,8 @@ export function reiniciarEstado() {
   estado.errorNarrativa = null;
   estado.mesAbierto = null;
   estado.retos = [];
+  estado.dolar = null;
+  estado.casaDolar = "oficial";
   estado.inversiones = null;
   estado.errorInversiones = null;
   estado.precios = {};

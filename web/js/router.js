@@ -125,6 +125,9 @@ export function pintar(conEntrada = false) {
     errorNarrativa: estado.errorNarrativa,
     mesAbierto: estado.mesAbierto,
     retos: estado.retos,
+    dolar: estado.dolar,
+    casaDolar: estado.casaDolar,
+    setCasaDolar: acciones.setCasaDolar,
     generarNarrativa: acciones.generarNarrativa,
     verNarrativaDe: acciones.verNarrativaDe,
     // La fecha de hoy la pone el router y no cada pantalla: así todas las
