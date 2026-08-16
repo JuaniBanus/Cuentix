@@ -13,6 +13,7 @@ import {
   traerPeriodo,
   traerRetos,
 } from "./data.js";
+import { traerDolar } from "./dolar.js";
 import { borrar as borrarFoto, subir as subirFoto } from "./fotos.js";
 import {
   agregados as agregadosDelMes,
@@ -71,6 +72,10 @@ async function arrancar() {
       analizarGastos,
       generarNarrativa,
       verNarrativaDe,
+      setCasaDolar: (casa) => {
+        estado.casaDolar = casa;
+        pintar();
+      },
     },
   });
   montarSelectorPeriodo({
@@ -150,6 +155,15 @@ async function cargarDatos() {
     // La serie del dólar no se espera: es de terceros y solo la usa una
     // sección. Cuando llega, se repinta. Si falla, el patrimonio se muestra
     // en pesos y lo dice.
+    // Las cotizaciones tampoco se esperan: son de terceros y solo las usa el
+    // panel de Gastos. traerDolar nunca lanza, devuelve el error como dato.
+    if (!estado.dolar) {
+      traerDolar().then((d) => {
+        estado.dolar = d;
+        pintar();
+      });
+    }
+
     if (!estado.serieDolar) {
       serieDolar()
         .then((serie) => {
