@@ -99,6 +99,19 @@ export function pintar(conEntrada = false) {
   // cinco pantallas.
   empezarPintado(conEntrada);
 
+  // La transición entre secciones. La clase se saca y se vuelve a poner en el
+  // cuadro siguiente porque el navegador no reinicia una animación CSS si la
+  // clase ya estaba: sin ese ida y vuelta, la segunda vez que entrás a una
+  // pestaña no se anima nada.
+  //
+  // Solo al cambiar de sección (`conEntrada`), no en cada repintado: tocar el
+  // ojo o cambiar de moneda redibuja la pantalla, y animarla entera en cada
+  // toque sería mareante.
+  if (conEntrada) {
+    contenido.classList.remove("entrando");
+    requestAnimationFrame(() => contenido.classList.add("entrando"));
+  }
+
   // Todas las pantallas reciben el mismo contexto, así ninguna necesita
   // importar el estado ni saber cómo se recarga.
   actual.render(contenido, {

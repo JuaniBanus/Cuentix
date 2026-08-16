@@ -14,10 +14,30 @@
      chiquito que lleva adentro tengan exactamente el mismo radio es lo que
      delata una plantilla: cuando alguien lo dibuja a mano, el radio acompaña al
      tamaño de la pieza. */
-  --r-panel: 20px;
-  --r-tarjeta: 16px;
-  --r-boton: 10px;
+  --r-panel: 22px;
+  --r-tarjeta: 18px;
+  --r-boton: 12px;
   --r-pastilla: 999px;
+  /* Para piezas de 10 a 40px: avatares, puntos de leyenda, badges. Con
+     --r-boton se veían demasiado redondas a ese tamaño. */
+  --r-mini: 8px;
+
+  /* ------------------------------------------------------------- Vidrio --
+     El desenfoque va en un token y no suelto en cada regla porque su costo es
+     real: cada superficie con backdrop-filter obliga al navegador a recomponer
+     lo que hay detrás. Centralizarlo permite bajarlo de un lugar si un celular
+     viejo se traba, y permite apagarlo entero con @supports.
+
+     La saturación importa tanto como el blur: es lo que da el color vivo del
+     vidrio de iOS. Solo desenfocar deja una superficie lechosa y apagada. */
+  --vidrio-blur: blur(20px) saturate(180%);
+  --vidrio-blur-suave: blur(16px) saturate(160%);
+  --vidrio-blur-panel: blur(24px) saturate(180%);
+
+  /* Un pelo de línea, no un borde. En pantallas de alta densidad 0.5px se
+     dibuja de verdad; en el resto el navegador lo redondea a 1 y tampoco
+     molesta. */
+  --hairline: .5px;
 
   --ancho: 480px;
   --alto-tabs: 62px;
@@ -56,6 +76,16 @@
 
   --borde: rgba(233, 239, 238, .12);
   --borde-fuerte: rgba(233, 239, 238, .2);
+
+  /* Fondos de las superficies de vidrio. Van por tema porque el vidrio no es
+     un efecto puro: necesita un color abajo, y el que funciona sobre oscuro
+     deja la superficie sucia sobre claro.
+     Semitransparentes a propósito: si fueran opacos, el blur no se vería. */
+  --vidrio: rgba(16, 42, 46, .72);
+  --vidrio-nav: rgba(11, 31, 35, .78);
+  /* El borde del vidrio de Apple es una luz, no una línea: un blanco muy
+     tenue que simula el canto iluminado del panel. */
+  --vidrio-borde: rgba(233, 239, 238, .14);
   /* Los campos del login llevan borde propio: es lo único que dice dónde
      empieza y termina el recuadro donde se escribe. */
   --borde-campo: rgba(233, 239, 238, .3);
@@ -129,6 +159,13 @@
 
   --borde: rgba(28, 43, 45, .12);
   --borde-fuerte: rgba(28, 43, 45, .34);
+
+  /* Sobre claro el vidrio va casi blanco y MÁS opaco: con la misma
+     transparencia que en oscuro, el texto de abajo se transparenta y la barra
+     se vuelve ilegible. */
+  --vidrio: rgba(255, 255, 255, .78);
+  --vidrio-nav: rgba(239, 243, 243, .82);
+  --vidrio-borde: rgba(28, 43, 45, .1);
   /* Más marcado que en oscuro: un campo blanco sobre un fondo casi blanco no se
      distingue por el relleno, solo por el borde. Este llega a 3.4:1. */
   --borde-campo: rgba(28, 43, 45, .55);
@@ -178,7 +215,12 @@ html, body {
   margin: 0;
   background: var(--fondo);
   color: var(--texto);
-  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* San Francisco primero. El orden importa más de lo que parece: con Inter
+     adelante, un iPhone se bajaba Inter por red para terminar mostrando algo
+     casi idéntico a la fuente que ya tenía instalada. Ahora en Apple gana SF
+     nativa y NO se descarga nada; en el resto sigue Inter, como antes. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
+               Inter, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -326,16 +368,60 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* El botón acá no va a lo ancho: es una salida, no la acción principal. */
 .aviso-boton { width: auto; margin-top: 16px; padding: 9px 22px; }
 
+/* ----------------------------------------------------------------- Vidrio */
+/*
+   Se usa en CUATRO superficies y ninguna más: la barra de navegación (móvil y
+   escritorio), la tarjeta de balance y los paneles flotantes.
+
+   El límite no es estético sino de rendimiento. backdrop-filter obliga al
+   navegador a recomponer todo lo que hay detrás del elemento, y en una lista
+   de treinta movimientos con vidrio en cada fila el scroll se arrastra en
+   cualquier celular de gama media. Las superficies elegidas son o fijas (no
+   scrollean) o una sola por pantalla.
+
+   Regla que no se rompe: NUNCA vidrio dentro de vidrio. Duplica el costo y no
+   se distingue a simple vista. */
+
+.vidrio {
+  background: var(--vidrio);
+  backdrop-filter: var(--vidrio-blur);
+  -webkit-backdrop-filter: var(--vidrio-blur);
+  border: var(--hairline) solid var(--vidrio-borde);
+}
+
+/* Sin soporte, el vidrio se vuelve una superficie sólida en vez de un panel
+   semitransparente que dejaría ver el texto de atrás. Firefox lo trae
+   desactivado por defecto en algunas versiones, así que esto no es un caso
+   teórico. */
+@supports not (backdrop-filter: blur(1px)) {
+  .vidrio, .tabs, .barra-secciones, .panel {
+    background: var(--superficie);
+  }
+}
+
+/* Ahorro de datos: el usuario pidió que el dispositivo trabaje menos.
+   El blur es de lo más caro que hay en una interfaz. */
+@media (prefers-reduced-transparency: reduce) {
+  .vidrio, .tabs, .barra-secciones, .panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--superficie);
+  }
+}
+
 /* ---------------------------------------------------------------- Botones */
 
 /* Borde de acento sobre transparente: nunca rellenos sólidos de color. */
 .boton {
   display: block; width: 100%;
-  padding: 12px 16px;
+  padding: 12px 18px;
   background: transparent;
   border: 1px solid var(--borde-fuerte);
-  border-radius: var(--r-boton);
+  /* Cápsula: es la forma de botón de iOS. Con width:100% el radio grande no
+     deforma nada, solo redondea los extremos. */
+  border-radius: var(--r-pastilla);
   font-weight: 500;
+  letter-spacing: -.01em;
   transition: border-color .2s var(--curva), background .2s var(--curva),
               box-shadow .2s var(--curva), transform .12s var(--curva);
 }
@@ -351,6 +437,24 @@ button { font: inherit; color: inherit; cursor: pointer; }
    que cambia de color en algo que responde al dedo. */
 .boton:active:not(:disabled) { transform: translateY(1px); }
 .boton:disabled { opacity: .5; cursor: default; }
+
+/* El toque de iOS: al presionar, el control se apaga y se achica apenas.
+   Solo donde NO hay mouse. En desktop el hover ya da la respuesta y sumar
+   esto haría que cada clic parpadee.
+
+   Es lo que más "se siente Apple" de todo el rediseño, y no tiene nada que
+   ver con la forma: es la respuesta inmediata al dedo. Por eso son 90ms —más
+   lento se lee como animación, y una animación llega tarde. */
+@media (hover: none) {
+  .boton:active:not(:disabled),
+  .boton-icono:active:not(:disabled),
+  .chip:active,
+  .tab:active {
+    opacity: .55;
+    transform: scale(.97);
+    transition: opacity 90ms var(--curva), transform 90ms var(--curva);
+  }
+}
 
 .boton-con-icono {
   display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -377,9 +481,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 36px; height: 36px;
   background: transparent;
   border: 1px solid var(--borde);
-  border-radius: var(--r-boton);
+  /* Círculo, como los controles de la barra de iOS. */
+  border-radius: var(--r-pastilla);
   color: var(--tenue);
-  transition: color .15s, border-color .15s;
+  transition: color .15s var(--curva), border-color .15s var(--curva),
+              opacity 90ms var(--curva), transform 90ms var(--curva);
 }
 .boton-icono:hover { color: var(--texto); }
 .boton-icono.es-activo { color: var(--acento-tinta); border-color: var(--acento); }
@@ -392,7 +498,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 20px; height: 20px;
   fill: none; stroke: currentColor;
   stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  transition: stroke-width .2s var(--curva);
 }
+
+/* La sección activa engorda apenas el trazo, como hacen los SF Symbols al
+   pasar de regular a medium. Es más sutil que un cambio de color y se lee
+   incluso para quien no distingue el acento del gris. */
+.tab.es-activo .icono { stroke-width: 1.9; }
 
 .chips { display: flex; gap: 6px; margin-bottom: 12px; }
 /* Pastilla y no rectángulo redondeado, al revés que los meses del panel. La
@@ -441,10 +553,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 20;
   width: min(304px, calc(100vw - 36px));
   padding: 16px;
+  /* Vidrio más marcado que la nav: el panel FLOTA sobre el contenido, y ahí
+     el desenfoque cumple una función real —despegarlo del fondo— en vez de
+     ser decoración. Es una sola superficie y aparece a pedido, así que el
+     costo no se paga en el scroll. */
   background:
     linear-gradient(180deg, var(--velo), transparent 96px),
-    var(--superficie);
-  border: 1px solid var(--borde-fuerte);
+    var(--vidrio);
+  backdrop-filter: var(--vidrio-blur-panel);
+  -webkit-backdrop-filter: var(--vidrio-blur-panel);
+  border: var(--hairline) solid var(--vidrio-borde);
   border-radius: var(--r-panel);
   box-shadow: var(--luz-interna), var(--sombra-panel);
 }
@@ -655,7 +773,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .posicion-marca {
   display: grid; place-items: center;
   width: 40px; height: 40px;
-  border-radius: var(--r-boton);
+  /* --r-mini y no --r-boton: al subir la escala, 12px sobre una pieza de 40
+     la dejaba casi circular y competía con los botones redondos de la barra.
+     El radio acompaña al tamaño. */
+  border-radius: var(--r-mini);
   background: var(--acento-suave);
   border: 1px solid var(--borde);
   color: var(--acento-tinta);
@@ -910,7 +1031,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .movimiento-avatar {
   display: grid; place-items: center;
   width: 34px; height: 34px;
-  border-radius: var(--r-boton);
+  border-radius: var(--r-mini);
   background: var(--acento-suave);
   border: 1px solid var(--borde);
   color: var(--acento-tinta); font-size: 14px; font-weight: 500;
@@ -1051,6 +1172,45 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: linear-gradient(to right, var(--superficie) 30%, transparent);
 }
 
+/* ------------------------------------ Bloque de balance (Inicio) ---------- */
+/*
+   La única tarjeta de contenido con vidrio, y por eso mismo destaca: si lo
+   tuvieran todas, el efecto dejaría de señalar nada. Es una sola por pantalla
+   y no scrollea sola, así que el costo es acotado. */
+.bloque-heroe {
+  background: var(--vidrio);
+  backdrop-filter: var(--vidrio-blur-suave);
+  -webkit-backdrop-filter: var(--vidrio-blur-suave);
+  border: var(--hairline) solid var(--vidrio-borde);
+  border-radius: var(--r-panel);
+  padding: 18px;
+  box-shadow: var(--luz-interna);
+}
+
+/* ------------------------------------------ Transición entre pantallas ---- */
+/*
+   El cambio de sección era un corte seco. Ahora entra con un desplazamiento
+   corto y un fundido, con la misma curva que el resto de la app.
+
+   8px y no más: un desplazamiento largo se lee como "la página se está
+   cargando" y agrega espera percibida a algo que es instantáneo. La idea es
+   que el contenido parezca haber estado siempre ahí, no que viaje. */
+@media (prefers-reduced-motion: no-preference) {
+  .contenido.entrando > * {
+    animation: entrar-seccion .22s var(--curva) both;
+  }
+  /* Escalonado mínimo entre los primeros bloques: da la sensación de que la
+     pantalla se arma en vez de aparecer de golpe. Solo los tres primeros;
+     más allá el usuario ya está leyendo y el retardo molesta. */
+  .contenido.entrando > *:nth-child(2) { animation-delay: 30ms; }
+  .contenido.entrando > *:nth-child(3) { animation-delay: 60ms; }
+}
+
+@keyframes entrar-seccion {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ------------------------------------------------------------------- Tabs */
 
 .tabs {
@@ -1060,9 +1220,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
   max-width: var(--ancho); margin: 0 auto;
   padding-bottom: env(safe-area-inset-bottom);
-  background: color-mix(in srgb, var(--fondo) 92%, transparent);
-  backdrop-filter: blur(12px);
-  border-top: 1px solid var(--borde);
+  /* Vidrio de verdad: el blur sube de 12 a 20 y se le suma saturación, que es
+     lo que da el color vivo de la barra de iOS. Con solo desenfoque la barra
+     queda lechosa y parece un panel gris translúcido. */
+  background: var(--vidrio-nav);
+  backdrop-filter: var(--vidrio-blur);
+  -webkit-backdrop-filter: var(--vidrio-blur);
+  /* Hairline: en iOS la barra se separa del contenido con un pelo de línea,
+     no con un borde. Un 1px acá se lee como "caja". */
+  border-top: var(--hairline) solid var(--vidrio-borde);
 }
 /* El resaltado de la sección activa, como una pieza que se mueve en vez de un
    color que salta de un botón a otro. El JS le pasa las medidas del botón activo
@@ -1392,7 +1558,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
     display: flex; align-items: center;
     padding: 0 var(--sangria);
     border-top: 0;
-    border-bottom: 1px solid var(--borde);
+    /* Mismo hairline que en móvil, ahora abajo: la barra es la misma pieza y
+       tiene que sentirse igual en las dos orientaciones. El vidrio y la
+       saturación los hereda de la regla base, sin repetirlos. */
+    border-bottom: var(--hairline) solid var(--vidrio-borde);
   }
 
   /* Acá las cajas vuelven a existir: son las que arman las zonas. */
