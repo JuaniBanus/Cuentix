@@ -13,6 +13,7 @@ import { resumenDeGastos } from "../gastosCuentas.js";
 import { renderLinea } from "../linea.js";
 import { anterior } from "../periodo.js";
 import { acotar, celdasDeBarra, chipsMoneda, engancharMonedas, listaMovimientos } from "./comunes.js";
+import { esEscritorio } from "../pantalla.js";
 import { renderDolar } from "./dolar.js";
 import { renderComparacion, renderRecurrentes } from "./recurrentes.js";
 import { renderTermometro } from "./termometro.js";
@@ -292,7 +293,17 @@ export function renderGastos(contenedor, ctx) {
   // El termómetro va al final y mira TODO el historial, no el período: comparar
   // precios necesita meses. Se agrega después de que vistaDesglose escribió su
   // innerHTML, porque si no lo borraría.
-  if (ctx.historialGastos?.length) {
+  // Los tres paneles de análisis son SOLO de escritorio.
+  //
+  // No se esconden con CSS: no se ejecutan. Son los cálculos más pesados de la
+  // app —recorren el historial entero tres veces, detectan periodicidad y
+  // arman promedios de seis meses— y esconder el resultado dejaría al teléfono
+  // pagando todo ese trabajo para tirarlo.
+  //
+  // Además son tablas anchas y densas: en una pantalla angosta obligan a
+  // scrollear mucho para leer poco, y empujan hacia abajo el desglose de
+  // gastos, que es lo que se viene a mirar desde el celular.
+  if (ctx.historialGastos?.length && esEscritorio()) {
     // Los tres miran TODO el historial, no el período: comparar precios,
     // detectar periodicidad y promediar seis meses necesitan meses.
     renderComparacion(contenedor, {

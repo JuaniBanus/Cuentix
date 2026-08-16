@@ -27,6 +27,7 @@ import { estado, reiniciarEstado } from "./estado.js";
 import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
 import { serieDolar } from "./patrimonio.js";
+import { alCambiarDeTamano } from "./pantalla.js";
 import { anterior, mesActual } from "./periodo.js";
 import { traerHistorico, traerPrecios } from "./mercado.js";
 import { traerPreciosCripto } from "./precios.js";
@@ -57,6 +58,12 @@ async function arrancar() {
   // solo queda escuchar al sistema por si cambia con la app abierta.
   seguirAlSistema();
   registrarServiceWorker();
+
+  // Los paneles de análisis de Gastos no se dibujan en pantalla angosta. Como
+  // es una decisión de RENDER y no de CSS, cruzar el umbral tiene que
+  // repintar: si no, achicar la ventana los dejaría puestos y agrandarla no
+  // los traería hasta la próxima navegación.
+  alCambiarDeTamano(() => pintar());
 
   montarNavegacion({
     nav: document.querySelector("#tabs"),
