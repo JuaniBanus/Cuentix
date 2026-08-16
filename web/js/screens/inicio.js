@@ -120,7 +120,7 @@ export function renderInicio(contenedor, ctx) {
   });
 
   contenedor.innerHTML = `
-    <section class="bloque">
+    <section class="bloque bloque-heroe">
       ${chipsMoneda({ monedas, moneda })}
       <p class="etiqueta">Balance de ${esc(periodo.etiqueta)}</p>
       <p class="cifra-heroe ${balance < 0 ? "es-negativo" : ""}"

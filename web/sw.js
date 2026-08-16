@@ -18,7 +18,7 @@
 //
 // Subir VERSION borra el caché viejo. Hay que tocarla solo si cambia esta lista.
 
-const VERSION = "cuentix-v14";
+const VERSION = "cuentix-v15";
 
 const ESENCIALES = [
   "./",
