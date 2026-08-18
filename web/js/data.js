@@ -133,6 +133,121 @@ function traducirErrorDeLogin(error) {
   return "No pudimos entrar. Probá de nuevo en un momento.";
 }
 
+// --------------------------------------------------------------------------
+// Perfil y administración
+// --------------------------------------------------------------------------
+//
+// El perfil es lo primero que se lee al entrar, antes que cualquier dato: de
+// ahí salen el rol —que decide qué app se dibuja— y el estado de la cuenta.
+//
+// Nada de esto manda un user_id para filtrar. Lo hace RLS: cada uno ve su
+// perfil, y el superusuario ve todos. Que la lista de usuarios y el perfil
+// propio salgan de la MISMA consulta no es descuido: es que la policy ya sabe
+// quién pregunta, y agregar un filtro en el navegador solo daría la ilusión de
+// que ese filtro protege algo.
+
+const PERFILES = "perfiles";
+
+/** El perfil de quien está logueado. null si todavía no tiene. */
+export async function traerPerfil(userId) {
+  const { data } = await pedir(
+    () =>
+      sb
+        .from(PERFILES)
+        .select("user_id, email, estado, rol, debe_cambiar_password, creado_en")
+        .eq("user_id", userId)
+        .maybeSingle(),
+    traducirErrorDePerfil
+  );
+  return data ?? null;
+}
+
+/**
+ * Todos los perfiles, para el panel de administración.
+ *
+ * A un usuario común esto le devuelve una sola fila —la suya— y no un error:
+ * con RLS, las filas ajenas no existen para su sesión. O sea que el panel no
+ * filtra datos aunque alguien logre dibujarlo.
+ */
+export async function traerUsuarios() {
+  const { data } = await pedir(
+    () =>
+      sb
+        .from(PERFILES)
+        .select("user_id, email, estado, rol, debe_cambiar_password, creado_en")
+        .order("creado_en", { ascending: true }),
+    traducirErrorDePerfil
+  );
+  return data ?? [];
+}
+
+/**
+ * Activa o pausa una cuenta.
+ *
+ * Va por RPC y no por un update directo, y esa es la única forma posible: sobre
+ * `perfiles` solo hay permiso de escritura para la columna
+ * debe_cambiar_password, así que un update de `estado` lo rechaza el motor
+ * antes de llegar a RLS. La función es SECURITY DEFINER y adentro comprueba que
+ * quien llama sea superusuario.
+ */
+export async function cambiarEstadoUsuario(userId, estado) {
+  await pedir(
+    () => sb.rpc("admin_cambiar_estado", { p_user_id: userId, p_estado: estado }),
+    traducirErrorDeAdmin
+  );
+}
+
+/**
+ * Cambia la contraseña y baja el flag de cambio obligatorio.
+ *
+ * El orden importa: primero la contraseña nueva, y solo si eso salió bien se
+ * baja el flag. Al revés, un fallo al cambiarla dejaría a la persona adentro
+ * con la provisoria puesta y sin que nada se lo vuelva a pedir.
+ */
+export async function cambiarPassword(nueva, userId) {
+  await pedir(() => sb.auth.updateUser({ password: nueva }), traducirErrorDePassword);
+
+  await pedir(
+    () =>
+      sb.from(PERFILES).update({ debe_cambiar_password: false }).eq("user_id", userId),
+    traducirErrorDePerfil
+  );
+}
+
+function traducirErrorDePerfil(error) {
+  const mensaje = String(error?.message ?? "");
+  if (error?.code === "42P01" || /does not exist/i.test(mensaje)) {
+    return "Falta crear la tabla de perfiles en Supabase.";
+  }
+  if (/jwt|expired/i.test(mensaje)) return "La sesión venció. Volvé a entrar.";
+  return "No pude leer tu perfil. Probá de nuevo en un momento.";
+}
+
+function traducirErrorDeAdmin(error) {
+  const mensaje = String(error?.message ?? "");
+  // El raise exception de admin_cambiar_estado llega como texto crudo. Los dos
+  // casos que puede tirar son entendibles tal cual, así que se muestran.
+  if (/superusuario/i.test(mensaje)) return "No tenés permiso para hacer eso.";
+  if (/tu propio estado/i.test(mensaje)) return "No podés cambiar tu propio estado.";
+  if (/does not exist|42883/i.test(mensaje)) {
+    return "Falta correr la migración que crea admin_cambiar_estado.";
+  }
+  return "No pude cambiar el estado de esa cuenta.";
+}
+
+function traducirErrorDePassword(error) {
+  const mensaje = String(error?.message ?? "");
+  if (/at least|should be at least|weak/i.test(mensaje)) {
+    return "La contraseña es muy corta. Poné al menos 8 caracteres.";
+  }
+  if (/same.*password|different from the old/i.test(mensaje)) {
+    return "Tiene que ser distinta de la que estás usando.";
+  }
+  if (/jwt|expired/i.test(mensaje)) return "La sesión venció. Volvé a entrar.";
+  return "No pude cambiar la contraseña. Probá de nuevo.";
+}
+
+
 /** Trae movimientos con filtros opcionales, del más reciente al más viejo. */
 export async function traerMovimientos({ desde, hasta, tipo } = {}) {
   const filas = [];

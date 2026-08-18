@@ -90,6 +90,46 @@
   </div>
 </main>
 
+<!-- ------------------------------------------- Cambio obligatorio de clave -->
+<!-- Vista aparte y no un cartel encima del dashboard: mientras la contraseña
+     provisoria siga puesta no se dibuja nada de la app, igual que sin sesión. -->
+<main id="vista-password" class="login" hidden>
+  <div class="login-caja">
+    <p class="login-marca">Cuentix</p>
+    <h1 class="login-titulo">Elegí una contraseña</h1>
+    <p class="apunte login-apunte">
+      Entraste con una contraseña provisoria. Cambiala para seguir.
+    </p>
+
+    <form id="form-password" autocomplete="on">
+      <label class="campo">
+        <span>Contraseña nueva</span>
+        <input type="password" name="password" required minlength="8"
+               autocomplete="new-password">
+      </label>
+      <label class="campo">
+        <span>Repetila</span>
+        <input type="password" name="repetir" required minlength="8"
+               autocomplete="new-password">
+      </label>
+      <p id="password-error" class="error" role="alert"></p>
+      <button type="submit" class="boton boton-acento">Guardar y entrar</button>
+    </form>
+  </div>
+</main>
+
+<!-- ------------------------------------------------- Cuenta sin acceso ----- -->
+<!-- Pausada, pendiente, o sin perfil. Se dice el motivo: un dashboard en cero
+     se lee como "perdí mis datos", que es lo contrario de lo que pasó. -->
+<main id="vista-estado" class="login" hidden>
+  <div class="login-caja">
+    <p class="login-marca">Cuentix</p>
+    <h1 class="login-titulo" id="estado-titulo">Tu cuenta no está habilitada</h1>
+    <p class="apunte login-apunte" id="estado-detalle"></p>
+    <button id="btn-salir-estado" class="boton">Cerrar sesión</button>
+  </div>
+</main>
+
 <!-- -------------------------------------------------------------------- App -->
 <div id="vista-app" hidden>
   <header class="cabecera">
