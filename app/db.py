@@ -13,6 +13,24 @@ Dos cosas heredadas del diseño anterior que conviene conocer:
 - La columna `monto` ahora es numeric(14,2) —un decimal de verdad, no TEXT
   como en SQLite—, pero PostgREST la serializa como número JSON, que Python
   parsea a float. Por eso toda lectura pasa por `_a_decimal`.
+
+EL user_id NO ES OPCIONAL
+El bot se conecta con la clave service_role, que SALTEA RLS. Las policies que
+aíslan a los usuarios en el navegador acá no corren: para PostgREST con esa
+clave, la tabla `movimientos` es una sola tabla con los movimientos de todos.
+
+Por eso cada función que toca datos de alguien lleva `user_id` como parámetro
+OBLIGATORIO y de solo palabra clave. Es a propósito que no tenga default:
+
+- Sin default, olvidarse de pasarlo es un TypeError al llamar, no una consulta
+  silenciosa que devuelve la base entera.
+- De solo palabra clave, no se puede pasar de casualidad en la posición
+  equivocada.
+
+La regla, entonces: si una función de este módulo lee o escribe algo de un
+usuario, su `user_id` viaja en la llamada. Las únicas excepciones —las de los
+crons, que trabajan sobre todos los usuarios a la vez— están marcadas una por
+una en su docstring.
 """
 
 from __future__ import annotations
@@ -25,7 +43,7 @@ from typing import Any
 from postgrest import APIError
 from supabase import Client, create_client
 
-from app.config import SUPABASE_KEY, SUPABASE_URL, SUPABASE_USER_ID
+from app.config import SUPABASE_KEY, SUPABASE_URL
 from app.models import Alerta, Inversion, Moneda, Movimiento, TipoMovimiento
 
 logger = logging.getLogger(__name__)
@@ -36,6 +54,9 @@ TABLA_INVERSIONES = "inversiones"
 TABLA_ALERTAS = "alertas"
 TABLA_RECORDATORIOS = "recordatorios"
 TABLA_RETOS = "retos"
+TABLA_RENDIMIENTOS = "rendimientos_billeteras"
+TABLA_VINCULOS = "usuarios_telegram"
+TABLA_PERFILES = "perfiles"
 
 # PostgREST tiene un tope de filas por respuesta (1000 por defecto en
 # Supabase). Sin paginar, un total sobre todo el historial se calcularía
@@ -76,16 +97,104 @@ def _a_decimal(valor: Any) -> Decimal:
     return valor.quantize(_CENTAVOS)
 
 
+def _exigir(user_id: str) -> str:
+    """Devuelve el user_id, o rompe si vino vacío.
+
+    Parece de más, porque las firmas ya lo exigen. No lo es: el valor puede
+    venir de un dict, de un JSON o de una fila, y ahí `None` o `""` pasan sin
+    que nadie se dé cuenta. Un `.eq("user_id", None)` no explota: PostgREST lo
+    manda como el texto "None", no matchea nada y la consulta devuelve una
+    lista vacía. Ese es el peor final posible —el usuario ve todo en cero y
+    cree que perdió los datos—, así que se corta acá con un error que dice qué
+    pasó.
+    """
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise DBError(
+            "Falta el user_id: no se puede leer ni escribir sin saber de quién "
+            "son los datos."
+        )
+    return user_id.strip()
+
+
+# --------------------------------------------------------------------------
+# Identidad: de un chat de Telegram a un usuario de Supabase
+# --------------------------------------------------------------------------
+#
+# Las dos únicas lecturas que NO llevan user_id, porque son justamente las que
+# lo averiguan. Sobre ellas se apoya app/usuarios.py, que agrega el caché y la
+# decisión de habilitar o no.
+
+
+def vinculo_de_chat(chat_id: int) -> dict | None:
+    """La fila de `usuarios_telegram` de ese chat, o None si no está vinculado.
+
+    None significa "este chat no es de nadie". Un error de red, en cambio,
+    levanta DBError: no es lo mismo saber que no hay vínculo que no haber
+    podido preguntar, y confundirlos dejaría a un usuario legítimo afuera —o,
+    peor, invitaría a tratar el error como "seguí igual".
+    """
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA_VINCULOS)
+            .select("chat_id, user_id, alias")
+            .eq("chat_id", chat_id)
+            .limit(1)
+            .execute()
+        ).data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        # 42P01 = la tabla no existe: falta correr migrations/009.
+        logger.error("Supabase rechazó la consulta del vínculo: %s", detalle)
+        raise DBError(f"No pude leer el vínculo del chat: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando el vínculo del chat")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return filas[0] if filas else None
+
+
+def perfil_de(user_id: str) -> dict | None:
+    """El perfil de un usuario, con su estado de cuenta. None si no existe."""
+    user_id = _exigir(user_id)
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA_PERFILES)
+            .select("user_id, email, estado, rol")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        ).data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la consulta del perfil: %s", detalle)
+        raise DBError(f"No pude leer el perfil: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando el perfil")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return filas[0] if filas else None
+
+
 def _aplicar_filtros(
     consulta: Any,
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
     moneda: Moneda | None = None,
     categoria: str | None = None,
 ) -> Any:
-    """Encadena sobre la query solo los filtros que vengan definidos."""
+    """Encadena sobre la query solo los filtros que vengan definidos.
+
+    El de user_id no es "solo si viene": va SIEMPRE y va primero. Es el único
+    que no depende de lo que haya preguntado el usuario, porque no acota la
+    respuesta: define de quién es la pregunta.
+    """
+    consulta = consulta.eq("user_id", _exigir(user_id))
+
     if desde is not None:
         consulta = consulta.gte("fecha", desde.isoformat())
     if hasta is not None:
@@ -103,6 +212,7 @@ def _aplicar_filtros(
 def _seleccionar(
     columnas: str,
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
@@ -123,6 +233,7 @@ def _seleccionar(
 
         consulta = _aplicar_filtros(
             cliente.table(TABLA).select(columnas),
+            user_id=user_id,
             desde=desde,
             hasta=hasta,
             tipo=tipo,
@@ -171,8 +282,26 @@ def init_db() -> None:
     except Exception as exc:
         raise DBError(f"No pude conectarme a Supabase ({SUPABASE_URL}).") from exc
 
+    # Las dos tablas de las que ahora depende el control de acceso. Si falta
+    # alguna, el bot no puede saber de quién es ningún mensaje, y conviene
+    # enterarse al arrancar y no cuando el primer usuario escriba y reciba un
+    # "no tengo tu acceso habilitado" que no es cierto.
+    for tabla in (TABLA_VINCULOS, TABLA_PERFILES):
+        try:
+            _obtener_cliente().table(tabla).select("user_id").limit(1).execute()
+        except APIError as exc:
+            detalle = getattr(exc, "message", None) or str(exc)
+            raise DBError(
+                f"No pude leer la tabla '{tabla}' en Supabase: {detalle}. "
+                "Falta correr migrations/009_multiusuario.sql en el SQL Editor."
+            ) from exc
+        except Exception as exc:
+            raise DBError(f"No pude conectarme a Supabase ({SUPABASE_URL}).") from exc
 
-def guardar_movimiento(movimiento: Movimiento, objetivo_id: str | None = None) -> int:
+
+def guardar_movimiento(
+    movimiento: Movimiento, objetivo_id: str | None = None, *, user_id: str
+) -> int:
     """Inserta un Movimiento y devuelve el id asignado.
 
     `created_at` lo pone Postgres solo (DEFAULT now()).
@@ -181,8 +310,12 @@ def guardar_movimiento(movimiento: Movimiento, objetivo_id: str | None = None) -
     hay que preguntar primero, el movimiento se guarda igual sin él y después
     se imputa con `imputar_movimiento`: la plata se apartó, y perder el
     registro por una duda sobre a qué objetivo va sería el peor negocio.
+
+    El `user_id` va explícito: la columna es NOT NULL y su default auth.uid()
+    no se completa con service_role, que es como escribe el bot.
     """
     fila = {
+        "user_id": _exigir(user_id),
         "fecha": movimiento.fecha.isoformat(),
         "tipo": movimiento.tipo.value,
         # str() y no float(): el JSON sale con el decimal exacto y Postgres
@@ -228,20 +361,23 @@ def guardar_movimiento(movimiento: Movimiento, objetivo_id: str | None = None) -
 # El bot escribe con la clave service_role, que saltea RLS. Eso trae dos cosas
 # que hay que tener presentes:
 #
-# 1. Al leer ve los objetivos de TODOS los usuarios. Por eso se filtra por
-#    SUPABASE_USER_ID cuando está configurado.
+# 1. Al leer ve los objetivos de TODOS los usuarios. El `.eq("user_id", ...)`
+#    de cada consulta es lo único que lo impide: no hay red de contención
+#    abajo, porque RLS no corre para esta clave.
 # 2. Al insertar, el `default auth.uid()` de la columna user_id devuelve null
 #    —no hay sesión de nadie—, y la columna es NOT NULL. Así que el user_id hay
-#    que mandarlo explícito, y sin SUPABASE_USER_ID no se pueden crear.
+#    que mandarlo explícito o el insert falla.
 
 
-def obtener_objetivos(*, solo_activos: bool = True) -> list[dict]:
-    """Los objetivos del usuario, para buscar a cuál imputar un ahorro."""
+def obtener_objetivos(*, user_id: str, solo_activos: bool = True) -> list[dict]:
+    """Los objetivos de ese usuario, para buscar a cuál imputar un ahorro."""
     cliente = _obtener_cliente()
-    consulta = cliente.table(TABLA_OBJETIVOS).select("id, nombre, monto_objetivo, moneda, estado")
+    consulta = (
+        cliente.table(TABLA_OBJETIVOS)
+        .select("id, nombre, monto_objetivo, moneda, estado")
+        .eq("user_id", _exigir(user_id))
+    )
 
-    if SUPABASE_USER_ID:
-        consulta = consulta.eq("user_id", SUPABASE_USER_ID)
     if solo_activos:
         # Los completados y pausados no se ofrecen: sumarle a algo terminado
         # casi nunca es lo que se quiso decir.
@@ -258,21 +394,12 @@ def obtener_objetivos(*, solo_activos: bool = True) -> list[dict]:
         raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
-def crear_objetivo(*, nombre: str, monto_objetivo: Decimal, moneda: Moneda) -> dict:
-    """Crea un objetivo y devuelve la fila.
-
-    Raises:
-        DBError: si no hay SUPABASE_USER_ID configurado. Sin él la fila no
-            tendría dueño y Postgres la rechazaría por el NOT NULL.
-    """
-    if not SUPABASE_USER_ID:
-        raise DBError(
-            "No puedo crear objetivos: falta configurar SUPABASE_USER_ID. "
-            "Se crean desde la web."
-        )
-
+def crear_objetivo(
+    *, user_id: str, nombre: str, monto_objetivo: Decimal, moneda: Moneda
+) -> dict:
+    """Crea un objetivo a nombre de ese usuario y devuelve la fila."""
     fila = {
-        "user_id": SUPABASE_USER_ID,
+        "user_id": _exigir(user_id),
         "nombre": nombre,
         "monto_objetivo": str(monto_objetivo),
         "moneda": moneda.value,
@@ -293,12 +420,19 @@ def crear_objetivo(*, nombre: str, monto_objetivo: Decimal, moneda: Moneda) -> d
     return respuesta.data[0]
 
 
-def imputar_movimiento(movimiento_id: int, objetivo_id: str) -> None:
-    """Le asigna un objetivo a un movimiento ya guardado."""
+def imputar_movimiento(movimiento_id: int, objetivo_id: str, *, user_id: str) -> None:
+    """Le asigna un objetivo a un movimiento ya guardado.
+
+    El `.eq("user_id", ...)` acota el UPDATE al dueño. El id del movimiento sale
+    de una pregunta abierta en memoria, que es por chat, así que en la práctica
+    ya es suyo; el filtro está igual porque un UPDATE por id sin acotar es la
+    clase de consulta que un día se copia a otro lado donde el id sí viene de
+    afuera.
+    """
     try:
         _obtener_cliente().table(TABLA).update({"objetivo_id": objetivo_id}).eq(
             "id", movimiento_id
-        ).execute()
+        ).eq("user_id", _exigir(user_id)).execute()
     except APIError as exc:
         detalle = getattr(exc, "message", None) or str(exc)
         logger.error("Supabase rechazó la imputación: %s", detalle)
@@ -308,22 +442,25 @@ def imputar_movimiento(movimiento_id: int, objetivo_id: str) -> None:
         raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
-def total_imputado(objetivo_id: str, moneda: Moneda) -> Decimal:
+def total_imputado(objetivo_id: str, moneda: Moneda, *, user_id: str) -> Decimal:
     """Cuánto se lleva ahorrado para un objetivo, en su moneda.
 
     El filtro por moneda no es un detalle: un aporte de US$400 imputado a una
     meta en pesos sumaría 400 sobre 500.000.
     """
-    filas = _seleccionar_imputados(objetivo_id, moneda)
+    filas = _seleccionar_imputados(objetivo_id, moneda, user_id=user_id)
     return sum((_a_decimal(f["monto"]) for f in filas), Decimal("0"))
 
 
-def _seleccionar_imputados(objetivo_id: str, moneda: Moneda) -> list[dict]:
+def _seleccionar_imputados(
+    objetivo_id: str, moneda: Moneda, *, user_id: str
+) -> list[dict]:
     cliente = _obtener_cliente()
     try:
         return (
             cliente.table(TABLA)
             .select("monto")
+            .eq("user_id", _exigir(user_id))
             .eq("objetivo_id", objetivo_id)
             .eq("moneda", moneda.value)
             .eq("tipo", TipoMovimiento.AHORRO.value)
@@ -344,7 +481,7 @@ def _seleccionar_imputados(objetivo_id: str, moneda: Moneda) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-def guardar_movimientos(movimientos: list[Movimiento]) -> list[int]:
+def guardar_movimientos(movimientos: list[Movimiento], *, user_id: str) -> list[int]:
     """Inserta varios movimientos de una y devuelve sus ids, en el mismo orden.
 
     Un solo INSERT en vez de N: para un mensaje con cinco gastos, la diferencia
@@ -357,8 +494,13 @@ def guardar_movimientos(movimientos: list[Movimiento]) -> list[int]:
     if not movimientos:
         return []
 
+    # Todos a nombre de quien mandó el mensaje: un mensaje viene de un chat, y
+    # un chat es de un solo usuario.
+    dueno = _exigir(user_id)
+
     filas = [
         {
+            "user_id": dueno,
             "fecha": m.fecha.isoformat(),
             "tipo": m.tipo.value,
             "monto": str(m.monto),
@@ -385,20 +527,14 @@ def guardar_movimientos(movimientos: list[Movimiento]) -> list[int]:
     return [int(fila["id"]) for fila in respuesta.data]
 
 
-def guardar_inversion(inversion: Inversion) -> str:
+def guardar_inversion(inversion: Inversion, *, user_id: str) -> str:
     """Inserta una tenencia en `inversiones` y devuelve su id (uuid).
 
     El `user_id` va explícito: el default auth.uid() de la tabla no se completa
     con service_role, que es como escribe el bot.
     """
-    if not SUPABASE_USER_ID:
-        raise DBError(
-            "Falta SUPABASE_USER_ID en la configuración: sin ese dato no se "
-            "puede saber de quién es la inversión."
-        )
-
     fila = {
-        "user_id": SUPABASE_USER_ID,
+        "user_id": _exigir(user_id),
         "tipo": inversion.tipo.value,
         "ticker": inversion.ticker,
         "nombre": inversion.nombre,
@@ -434,6 +570,7 @@ def guardar_inversion(inversion: Inversion) -> str:
 def crear_alerta(
     alerta: Alerta,
     *,
+    user_id: str,
     chat_id: int,
     referencia: Decimal | None,
     moneda: str | None,
@@ -443,15 +580,13 @@ def crear_alerta(
     `referencia` es el precio del momento: contra él se miden después los
     porcentajes. Se guarda al crear y no se recalcula, para que "baja 5%"
     signifique siempre 5% desde que la pediste.
-    """
-    if not SUPABASE_USER_ID:
-        raise DBError(
-            "Falta SUPABASE_USER_ID en la configuración: sin ese dato no se "
-            "puede saber de quién es la alerta."
-        )
 
+    Van los dos, user_id y chat_id, y no es redundante: el user_id es de quién
+    es la alerta (y con qué se filtra), el chat_id es adónde mandar el aviso
+    cuando suene, que puede pasar sin nadie conectado.
+    """
     fila = {
-        "user_id": SUPABASE_USER_ID,
+        "user_id": _exigir(user_id),
         "chat_id": chat_id,
         "ticker": alerta.ticker,
         "mercado": alerta.mercado,
@@ -479,9 +614,14 @@ def crear_alerta(
 def alertas_activas() -> list[dict]:
     """Todas las alertas encendidas, de todos los usuarios.
 
-    Sin filtrar por usuario a propósito: la corrida del cron no la pide nadie
-    en particular, revisa las de todos. Por eso el endpoint que la dispara va
-    protegido por un secreto y no por una sesión.
+    EXCEPCIÓN a la regla del user_id, y de las tres que hay es la más fácil de
+    leer mal. Sin filtrar por usuario a propósito: la corrida del cron no la
+    pide nadie en particular, revisa las de todos. Por eso el endpoint que la
+    dispara va protegido por un secreto y no por una sesión.
+
+    Que no se filtre acá no mezcla datos de nadie: cada fila se responde a SU
+    chat_id, el que quedó guardado al crearla. Lo que no puede hacer nunca esta
+    función es alimentar una respuesta a un mensaje entrante.
     """
     try:
         return (
@@ -501,13 +641,19 @@ def alertas_activas() -> list[dict]:
         raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
-def alertas_de_chat(chat_id: int) -> list[dict]:
-    """Las alertas activas de un chat, para poder listarlas por Telegram."""
+def alertas_de_chat(chat_id: int, *, user_id: str) -> list[dict]:
+    """Las alertas activas de un chat, para poder listarlas por Telegram.
+
+    Filtra por los dos. Con chat_id solo alcanzaría mientras un chat pertenezca
+    siempre al mismo usuario; si un chat se revincula a otra cuenta, el dueño
+    nuevo vería las alertas del anterior.
+    """
     try:
         return (
             _obtener_cliente()
             .table(TABLA_ALERTAS)
             .select("*")
+            .eq("user_id", _exigir(user_id))
             .eq("chat_id", chat_id)
             .eq("activa", True)
             .order("created_at", desc=True)
@@ -547,13 +693,14 @@ def apagar_alerta(alerta_id: str, *, precio: Decimal | None = None) -> None:
         raise DBError("No pude comunicarme con la base de datos.") from exc
 
 
-def borrar_alertas_de_chat(chat_id: int) -> int:
+def borrar_alertas_de_chat(chat_id: int, *, user_id: str) -> int:
     """Apaga todas las de un chat. Devuelve cuántas."""
     try:
         respuesta = (
             _obtener_cliente()
             .table(TABLA_ALERTAS)
             .update({"activa": False})
+            .eq("user_id", _exigir(user_id))
             .eq("chat_id", chat_id)
             .eq("activa", True)
             .execute()
@@ -569,13 +716,14 @@ def borrar_alertas_de_chat(chat_id: int) -> int:
 # --------------------------------------------------------------------------
 
 
-def obtener_recordatorio(chat_id: int) -> dict | None:
+def obtener_recordatorio(chat_id: int, *, user_id: str) -> dict | None:
     """La configuración del chat, o None si nunca la fijó."""
     try:
         filas = (
             _obtener_cliente()
             .table(TABLA_RECORDATORIOS)
             .select("*")
+            .eq("user_id", _exigir(user_id))
             .eq("chat_id", chat_id)
             .limit(1)
             .execute()
@@ -592,6 +740,7 @@ def obtener_recordatorio(chat_id: int) -> dict | None:
 def guardar_recordatorio(
     chat_id: int,
     *,
+    user_id: str,
     hora: int | None = None,
     activo: bool | None = None,
     zona_horaria: str | None = None,
@@ -600,16 +749,22 @@ def guardar_recordatorio(
 
     Un upsert por `chat_id`, que es la clave primaria: fijar la hora dos veces
     pisa la anterior en vez de dejar dos filas que mandarían dos mensajes.
+
+    El user_id viaja en el upsert, así que si un chat se revincula a otra
+    cuenta, la fila pasa a ser del dueño nuevo en la primera corrida. Sin él el
+    insert fallaría: la columna quedó NOT NULL en migrations/009.
     """
-    fila: dict[str, Any] = {"chat_id": chat_id, "updated_at": "now()"}
+    fila: dict[str, Any] = {
+        "chat_id": chat_id,
+        "user_id": _exigir(user_id),
+        "updated_at": "now()",
+    }
     if hora is not None:
         fila["hora"] = hora
     if activo is not None:
         fila["activo"] = activo
     if zona_horaria is not None:
         fila["zona_horaria"] = zona_horaria
-    if SUPABASE_USER_ID:
-        fila["user_id"] = SUPABASE_USER_ID
 
     try:
         respuesta = (
@@ -632,7 +787,11 @@ def guardar_recordatorio(
 
 
 def recordatorios_activos() -> list[dict]:
-    """Todos los recordatorios encendidos.
+    """Todos los recordatorios encendidos, de todos los usuarios.
+
+    EXCEPCIÓN a la regla del user_id, por lo mismo que `alertas_activas`: la
+    dispara un cron, no una persona, y cada aviso sale al chat_id de su propia
+    fila. No alimenta ninguna respuesta a un mensaje entrante.
 
     El filtro por hora NO se hace en SQL: cada fila tiene su propia zona
     horaria, así que "son las 21" depende de cuál. La comparación se hace en
@@ -654,7 +813,12 @@ def recordatorios_activos() -> list[dict]:
 
 
 def marcar_recordatorio_enviado(chat_id: int, fecha_local: date) -> None:
-    """Deja constancia del envío para que el mismo día no se repita."""
+    """Deja constancia del envío para que el mismo día no se repita.
+
+    La tercera y última EXCEPCIÓN: la llama el mismo cron, sobre la fila que
+    acaba de usar, y `chat_id` es la clave primaria de la tabla. No lee nada
+    que después se le muestre a nadie.
+    """
     try:
         (
             _obtener_cliente()
@@ -670,13 +834,25 @@ def marcar_recordatorio_enviado(chat_id: int, fecha_local: date) -> None:
         raise DBError("No pude registrar el envío del recordatorio.") from exc
 
 
-def claves_de_items(*, limite: int = 1000) -> list[str]:
-    """Las claves de ítem que el usuario ya usó, para agrupar contra ellas."""
+def claves_de_items(*, user_id: str, limite: int = 1000) -> list[str]:
+    """Las claves de ítem que el usuario ya usó, para agrupar contra ellas.
+
+    Filtrar acá no es solo privacidad: las claves ajenas cambiarían cómo se
+    agrupan las propias, y el termómetro de inflación de uno se movería por lo
+    que compró otro.
+
+    `_exigir` va AFUERA del try a propósito: adentro, el `except Exception`
+    convertiría "no sé de quién es" en "no tiene ninguna", que es justo la
+    confusión que este módulo tiene que impedir. Mismo criterio en las demás
+    funciones de acá que degradan a un valor vacío.
+    """
+    dueno = _exigir(user_id)
     try:
         filas = (
             _obtener_cliente()
             .table(TABLA)
             .select("clave_item")
+            .eq("user_id", dueno)
             .not_.is_("clave_item", "null")
             .limit(limite)
             .execute()
@@ -690,8 +866,9 @@ def claves_de_items(*, limite: int = 1000) -> list[str]:
     return sorted({(f.get("clave_item") or "").strip() for f in filas} - {""})
 
 
-def historial_de_item(clave: str, *, limite: int = 60) -> list[dict]:
+def historial_de_item(clave: str, *, user_id: str, limite: int = 60) -> list[dict]:
     """Las compras anteriores de un ítem, de la más vieja a la más nueva."""
+    dueno = _exigir(user_id)
     if not clave:
         return []
     try:
@@ -699,6 +876,7 @@ def historial_de_item(clave: str, *, limite: int = 60) -> list[dict]:
             _obtener_cliente()
             .table(TABLA)
             .select("fecha,monto,moneda,precio_unitario,categoria")
+            .eq("user_id", dueno)
             .eq("clave_item", clave)
             .eq("tipo", TipoMovimiento.GASTO.value)
             .order("fecha")
@@ -710,13 +888,17 @@ def historial_de_item(clave: str, *, limite: int = 60) -> list[dict]:
         return []
 
 
-def movimientos_para_termometro(*, desde: date | None = None) -> list[dict]:
+def movimientos_para_termometro(
+    *, user_id: str, desde: date | None = None
+) -> list[dict]:
     """Gastos con clave de ítem, para calcular la inflación personal."""
+    dueno = _exigir(user_id)
     try:
         consulta = (
             _obtener_cliente()
             .table(TABLA)
             .select("fecha,monto,moneda,categoria,clave_item,precio_unitario,unidad")
+            .eq("user_id", dueno)
             .eq("tipo", TipoMovimiento.GASTO.value)
             .not_.is_("clave_item", "null")
             .order("fecha")
@@ -734,13 +916,15 @@ def movimientos_para_termometro(*, desde: date | None = None) -> list[dict]:
 # --------------------------------------------------------------------------
 
 
-def reto_activo(chat_id: int) -> dict | None:
+def reto_activo(chat_id: int, *, user_id: str) -> dict | None:
     """El reto abierto de ese chat, si hay uno."""
+    dueno = _exigir(user_id)
     try:
         filas = (
             _obtener_cliente()
             .table(TABLA_RETOS)
             .select("*")
+            .eq("user_id", dueno)
             .eq("chat_id", chat_id)
             .eq("estado", "activo")
             .order("created_at", desc=True)
@@ -754,11 +938,12 @@ def reto_activo(chat_id: int) -> dict | None:
 
 
 def crear_reto(
-    chat_id: int, *, categoria: str, ahorro_estimado, moneda: str,
+    chat_id: int, *, user_id: str, categoria: str, ahorro_estimado, moneda: str,
     desde: date, hasta: date,
 ) -> dict:
-    """Abre un reto. El user_id va si está configurado, para que lo vea la web."""
+    """Abre un reto a nombre de ese usuario, para que también lo vea en la web."""
     fila = {
+        "user_id": _exigir(user_id),
         "chat_id": chat_id,
         "categoria": categoria,
         "tipo": "sin_gastos",
@@ -768,8 +953,6 @@ def crear_reto(
         "hasta": hasta.isoformat(),
         "estado": "activo",
     }
-    if SUPABASE_USER_ID:
-        fila["user_id"] = SUPABASE_USER_ID
 
     try:
         respuesta = _obtener_cliente().table(TABLA_RETOS).insert(fila).execute()
@@ -802,13 +985,15 @@ def cerrar_reto(reto_id: str, estado: str, gastado) -> None:
         logger.warning("No pude cerrar el reto %s", reto_id, exc_info=True)
 
 
-def gastado_en_reto(reto: dict) -> Decimal:
+def gastado_en_reto(reto: dict, *, user_id: str) -> Decimal:
     """Cuánto se gastó del rubro del reto dentro de su ventana."""
+    dueno = _exigir(user_id)
     try:
         filas = (
             _obtener_cliente()
             .table(TABLA)
             .select("monto")
+            .eq("user_id", dueno)
             .eq("tipo", TipoMovimiento.GASTO.value)
             .eq("categoria", reto["categoria"])
             .eq("moneda", reto.get("moneda", "ARS"))
@@ -829,25 +1014,93 @@ def gastado_en_reto(reto: dict) -> Decimal:
     return total
 
 
-def obtener_inversiones(*, limite: int = 100) -> list[dict]:
+def obtener_inversiones(*, user_id: str, limite: int = 100) -> list[dict]:
     """Las tenencias del usuario. Hoy solo se usa para saber si tiene alguna.
 
     Devuelve [] ante cualquier error en vez de propagar: quien la llama la usa
     para decidir si agrega una línea a un mensaje, y no vale la pena tirar
     abajo la respuesta entera por eso.
+
+    Ojo con ese [] cuando se toca esta función: acá "no pude leer" y "no tiene
+    ninguna" terminan igual, y está bien porque el peor caso es una línea de
+    menos en un mensaje. El filtro por user_id va ANTES del try, así que un
+    user_id vacío levanta DBError en vez de caer en el except y devolver [].
     """
+    dueno = _exigir(user_id)
     try:
-        consulta = (
+        return (
             _obtener_cliente()
             .table(TABLA_INVERSIONES)
             .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra")
+            .eq("user_id", dueno)
             .limit(limite)
+            .execute()
+            .data
+            or []
         )
-        if SUPABASE_USER_ID:
-            consulta = consulta.eq("user_id", SUPABASE_USER_ID)
-        return consulta.execute().data or []
     except Exception:
         logger.warning("No pude leer las inversiones", exc_info=True)
+        return []
+
+
+# --------------------------------------------------------------------------
+# Rendimientos de billeteras virtuales
+# --------------------------------------------------------------------------
+#
+# La única tabla sin user_id: una TNA es pública e igual para todos. Las escribe
+# el cron con service_role y la web las lee directo de Supabase.
+
+
+def guardar_rendimientos(filas: list[dict]) -> int:
+    """Pisa las tasas de las billeteras que vengan. Devuelve cuántas guardó.
+
+    Es un UPSERT por `nombre`, no un delete-and-insert. La diferencia importa: si
+    la fuente devolviera hoy la mitad de las billeteras, borrar primero dejaría a
+    la otra mitad sin ninguna tasa. Así, las que no vinieron conservan la fila
+    anterior con su fecha vieja, y la pantalla la muestra como vieja.
+
+    Por el mismo motivo acá no hay ninguna función que borre.
+    """
+    if not filas:
+        return 0
+
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA_RENDIMIENTOS)
+            .upsert(filas, on_conflict="nombre")
+            .execute()
+        )
+        return len(respuesta.data or [])
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        # 42P01 = la tabla no existe: falta correr migrations/008.
+        raise DBError(f"No pude guardar los rendimientos: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando los rendimientos")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def obtener_rendimientos(*, limite: int = 60) -> list[dict]:
+    """Las tasas conocidas, de mayor a menor TNA.
+
+    Devuelve [] ante cualquier error en vez de propagar: quien la llama arma un
+    mensaje de Telegram, y una tabla de tasas caída no puede dejar al usuario
+    sin respuesta.
+    """
+    try:
+        return (
+            _obtener_cliente()
+            .table(TABLA_RENDIMIENTOS)
+            .select("nombre, tipo, tna, tope_monto, fecha_actualizacion, fondo")
+            .order("tna", desc=True)
+            .limit(limite)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        logger.warning("No pude leer los rendimientos de billeteras", exc_info=True)
         return []
 
 
@@ -880,6 +1133,7 @@ def _escapar_like(texto: str) -> str:
 
 def movimientos_para_analisis(
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
@@ -905,6 +1159,7 @@ def movimientos_para_analisis(
         tamano = min(PAGINA, limite - len(filas))
         consulta = _aplicar_filtros(
             cliente.table(TABLA).select("fecha,tipo,monto,moneda,categoria,descripcion,cuenta"),
+            user_id=user_id,
             desde=desde,
             hasta=hasta,
             tipo=tipo,
@@ -937,6 +1192,7 @@ def movimientos_para_analisis(
 
 def totales_por_moneda(
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
@@ -950,6 +1206,7 @@ def totales_por_moneda(
     """
     filas = _seleccionar(
         "moneda,monto",
+        user_id=user_id,
         desde=desde,
         hasta=hasta,
         tipo=tipo,
@@ -966,6 +1223,7 @@ def totales_por_moneda(
 
 def totales_por_categoria(
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
@@ -977,7 +1235,12 @@ def totales_por_categoria(
     una vez por cada moneda en la que haya movimientos.
     """
     filas = _seleccionar(
-        "categoria,moneda,monto", desde=desde, hasta=hasta, tipo=tipo, moneda=moneda
+        "categoria,moneda,monto",
+        user_id=user_id,
+        desde=desde,
+        hasta=hasta,
+        tipo=tipo,
+        moneda=moneda,
     )
 
     acumulado: dict[tuple[str, Moneda], Total] = {}
@@ -994,6 +1257,7 @@ def totales_por_categoria(
 
 def balance(
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     moneda: Moneda | None = None,
@@ -1005,10 +1269,12 @@ def balance(
     falsamente negativo.
     """
     ingresos = totales_por_moneda(
-        desde=desde, hasta=hasta, tipo=TipoMovimiento.INGRESO, moneda=moneda
+        user_id=user_id, desde=desde, hasta=hasta,
+        tipo=TipoMovimiento.INGRESO, moneda=moneda,
     )
     gastos = totales_por_moneda(
-        desde=desde, hasta=hasta, tipo=TipoMovimiento.GASTO, moneda=moneda
+        user_id=user_id, desde=desde, hasta=hasta,
+        tipo=TipoMovimiento.GASTO, moneda=moneda,
     )
 
     resultado: dict[Moneda, dict[str, Decimal]] = {}
@@ -1025,6 +1291,7 @@ def balance(
 
 def obtener_movimientos(
     *,
+    user_id: str,
     desde: date | None = None,
     hasta: date | None = None,
     tipo: TipoMovimiento | None = None,
@@ -1039,6 +1306,7 @@ def obtener_movimientos(
     """
     filas = _seleccionar(
         "*",
+        user_id=user_id,
         desde=desde,
         hasta=hasta,
         tipo=tipo,

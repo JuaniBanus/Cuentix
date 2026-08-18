@@ -129,7 +129,9 @@ async def _precio_de(inversion: dict, moneda: Moneda) -> Decimal | None:
         return None
 
 
-async def rendimiento(moneda: Moneda, hoy: date | None = None) -> Rendimiento | None:
+async def rendimiento(
+    moneda: Moneda, hoy: date | None = None, *, user_id: str
+) -> Rendimiento | None:
     """La tasa mensual realizada de la cartera en esa moneda, o None.
 
     None significa "no se pudo calcular", que puede ser porque no hay
@@ -138,7 +140,7 @@ async def rendimiento(moneda: Moneda, hoy: date | None = None) -> Rendimiento | 
     """
     hoy = hoy or date.today()
 
-    todas = obtener_inversiones(limite=200)
+    todas = obtener_inversiones(user_id=user_id, limite=200)
     de_la_moneda = [i for i in todas if i.get("moneda") == moneda.value]
     if not de_la_moneda:
         return None

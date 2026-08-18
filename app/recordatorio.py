@@ -65,16 +65,21 @@ def es_comando(texto: str) -> bool:
     return bool(_COMANDO.match((texto or "").strip()))
 
 
-def atender_comando(chat_id: int, texto: str) -> str:
-    """Resuelve /recordatorio y devuelve qué contestarle al usuario."""
+def atender_comando(chat_id: int, texto: str, user_id: str) -> str:
+    """Resuelve /recordatorio y devuelve qué contestarle al usuario.
+
+    `user_id` va porque la fila de `recordatorios` tiene dueño: es lo que hace
+    que el recordatorio también aparezca en la web de esa persona, y lo que
+    impide que dos usuarios que compartan un chat se pisen la configuración.
+    """
     coincidencia = _COMANDO.match(texto.strip())
     resto = (coincidencia.group("resto") or "").strip().lower() if coincidencia else ""
 
     try:
         if not resto:
-            return _estado(chat_id)
+            return _estado(chat_id, user_id)
         if resto in _APAGAR:
-            return _apagar(chat_id)
+            return _apagar(chat_id, user_id)
 
         hora = _leer_hora(resto)
         if hora is None:
@@ -82,7 +87,7 @@ def atender_comando(chat_id: int, texto: str) -> str:
                 "No entendí la hora 🤔\n"
                 "Probá: /recordatorio 21  ·  /recordatorio 9:00  ·  /recordatorio off"
             )
-        return _fijar(chat_id, hora)
+        return _fijar(chat_id, hora, user_id)
     except DBError as exc:
         logger.error("Recordatorio: %s", exc)
         return "No pude guardar el recordatorio 😬 Probá de nuevo en un ratito."
@@ -101,8 +106,8 @@ def _leer_hora(texto: str) -> int | None:
     return hora if 0 <= hora <= 23 else None
 
 
-def _fijar(chat_id: int, hora: int) -> str:
-    guardar_recordatorio(chat_id, hora=hora, activo=True)
+def _fijar(chat_id: int, hora: int, user_id: str) -> str:
+    guardar_recordatorio(chat_id, user_id=user_id, hora=hora, activo=True)
     return (
         f"🌙 Listo, te escribo todos los días a las {hora}:00.\n"
         "Me contás cómo te fue y anoto todo junto.\n\n"
@@ -110,13 +115,13 @@ def _fijar(chat_id: int, hora: int) -> str:
     )
 
 
-def _apagar(chat_id: int) -> str:
-    guardar_recordatorio(chat_id, activo=False)
+def _apagar(chat_id: int, user_id: str) -> str:
+    guardar_recordatorio(chat_id, user_id=user_id, activo=False)
     return "Listo, no te escribo más 🤐\nPara volver a prenderlo: /recordatorio 21"
 
 
-def _estado(chat_id: int) -> str:
-    config = obtener_recordatorio(chat_id)
+def _estado(chat_id: int, user_id: str) -> str:
+    config = obtener_recordatorio(chat_id, user_id=user_id)
     if config and config.get("activo"):
         return (
             f"🌙 Te escribo todos los días a las {config['hora']}:00.\n\n"

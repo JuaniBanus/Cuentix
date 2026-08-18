@@ -138,11 +138,19 @@ def _clave(fila: dict, dimension: Dimension, cuando: date) -> str:
     return "total"
 
 
-def ejecutar(plan: PlanConsulta, periodo: Periodo | None = None) -> Resultado:
-    """Corre el plan sobre un período y devuelve los grupos calculados."""
+def ejecutar(
+    plan: PlanConsulta, periodo: Periodo | None = None, *, user_id: str
+) -> Resultado:
+    """Corre el plan sobre un período y devuelve los grupos calculados.
+
+    `user_id` es de quién es la pregunta. Va como parámetro y no como algo que
+    este módulo pueda averiguar solo, para que no exista ninguna forma de pedir
+    un análisis sin decir sobre los datos de quién.
+    """
     ventana = periodo or plan.periodo
 
     filas = movimientos_para_analisis(
+        user_id=user_id,
         desde=ventana.desde,
         hasta=ventana.hasta,
         tipo=plan.tipo,

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, status
@@ -43,6 +44,7 @@ from app.narrativa import AgregadosMes, NarrativaError
 from app.narrativa import generar as generar_narrativa
 from app.recurrentes import detectar as detectar_recurrentes
 from app.recurrentes import redactar as redactar_recurrentes
+from app.rendimientos import actualizar as actualizar_rendimientos
 from app.retos import DURACION_DIAS as DURACION_RETO
 from app.retos import (
     proponer as proponer_reto,
@@ -73,6 +75,7 @@ from app.db import (
     init_db,
     obtener_inversiones,
     obtener_objetivos,
+    obtener_rendimientos,
     total_imputado,
     totales_por_categoria,
     totales_por_moneda,
@@ -93,6 +96,8 @@ from app.models import (
 )
 from app.objetivos import buscar, parsear_monto, progreso
 from app.parser import Interpretacion, ParserError, interpretar_mensaje
+from app.usuarios import Usuario
+from app.usuarios import resolver as resolver_usuario
 from app.recordatorio import atender_comando as atender_comando_recordatorio
 from app.recordatorio import enviar_recordatorios
 from app.recordatorio import es_comando as es_comando_recordatorio
@@ -122,6 +127,29 @@ MSG_NO_ENTENDI = (
 )
 MSG_ERROR_INTERNO = "Se me rompió algo 😬 Probá de nuevo en un ratito."
 
+# Lo que ve quien no tiene acceso: ni vinculado, ni pausado, ni pendiente, ni
+# "no pude consultar la base". Un solo texto para los cuatro casos, a propósito:
+# decir cuál es le contaría a un desconocido si una cuenta existe.
+#
+# El chat_id va en el mensaje porque es el dato que el administrador necesita
+# para dar de alta a alguien, y no es un secreto: es el número del propio chat,
+# el mismo que devuelve cualquier bot de utilidades de Telegram.
+MSG_SIN_ACCESO = (
+    "No tengo tu acceso habilitado 🔒\n"
+    "Contactá al administrador para que te dé de alta.\n\n"
+    "Tu número de chat es {chat_id}"
+)
+
+# Cada cuánto se le repite ese mensaje al mismo chat.
+#
+# Contestarle a un desconocido es un cambio respecto de cómo venía el bot, que
+# se quedaba mudo justamente para no confirmarle a nadie que existe. Se hace
+# porque un usuario legítimo recién dado de alta necesita entender por qué no
+# le contestan. El límite es la mitad del costo: quien insista veinte veces
+# recibe una respuesta, no veinte, así que el bot no sirve de amplificador.
+ESPERA_SIN_ACCESO = 30 * 60.0
+_ultimo_aviso: dict[int, float] = {}
+
 # Cuántas categorías mostrar en el desglose antes de agrupar el resto.
 TOPE_CATEGORIAS = 8
 
@@ -129,8 +157,22 @@ TOPE_CATEGORIAS = 8
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Arranque y apagado de la app."""
-    init_db()  # crea movimientos.db y la tabla si no existen (es idempotente)
+    init_db()  # verifica que las tablas existan y sean accesibles
     logger.info("Base de datos lista")
+
+    # Queda en el log del arranque cuál de los dos modos de acceso está activo.
+    # Sin esto, un chat_id olvidado en el .env se ve igual que un usuario mal
+    # dado de alta, y son dos problemas distintos con dos arreglos distintos.
+    if CHATS_PERMITIDOS:
+        logger.warning(
+            "CHATS_PERMITIDOS tiene %s chat(s): además de estar en "
+            "usuarios_telegram, hay que estar en esa lista. Vaciala para que "
+            "mande solo la tabla.",
+            len(CHATS_PERMITIDOS),
+        )
+    else:
+        logger.info("Acceso por usuarios_telegram (CHATS_PERMITIDOS vacío)")
+
     yield
     await cerrar_cliente()  # cierra el AsyncClient de httpx
     await cerrar_cliente_sesion()  # el que valida las sesiones de la web
@@ -292,6 +334,30 @@ async def disparar_recordatorios(secret: str) -> dict:
     return await enviar_recordatorios()
 
 
+@app.post("/tareas/rendimientos/{secret}")
+async def actualizar_tasas_billeteras(secret: str) -> dict:
+    """Refresca las TNA de las billeteras virtuales desde la fuente pública.
+
+    Mismo criterio que las alertas: lo llama un cron, va protegido por el mismo
+    secreto en la URL y corre dentro del request para que el cron pueda saber si
+    salió bien.
+
+    Va en el threadpool porque `actualizar()` es sincrónica y bloqueante —baja
+    33 MB de JSON y escribe en Supabase—, y sin eso frenaría el event loop
+    entero: el bot dejaría de contestar mensajes durante varios segundos.
+
+    Nunca devuelve un 5xx por culpa de la fuente. Si la API de terceros está
+    caída, esto responde 200 con `ok: false` y el detalle: es información para
+    el log del cron, no una falla de nuestro servicio. Las tasas anteriores
+    quedan intactas.
+    """
+    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
+        logger.warning("Disparo de rendimientos con secreto inválido")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+    return await run_in_threadpool(actualizar_rendimientos)
+
+
 @app.get("/api/cuota")
 async def api_cuota() -> dict:
     """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
@@ -365,28 +431,44 @@ async def procesar_update(update: Any) -> None:
     Telegram ya se mandó, así que un error solo serviría para ensuciar el log
     y dejar al usuario sin respuesta.
     """
-    # El filtro va antes que todo lo demás: a un chat ajeno no le contestamos
-    # nada, ni siquiera "solo entiendo texto". Un bot que responde confirma que
-    # existe e invita a seguir probando; uno mudo se abandona enseguida.
+    # De quién es este mensaje. Va antes que TODO lo demás —antes de mirar si
+    # el update trae texto, antes de tocar la base— porque sin esta respuesta
+    # no hay ninguna consulta que se pueda hacer: cada lectura y cada escritura
+    # de app/db.py necesitan un user_id, y no existe un valor por defecto.
     chat_id = extraer_chat_id(update)
-    if chat_id is not None and chat_id not in CHATS_PERMITIDOS:
-        logger.warning("Mensaje ignorado: el chat %s no está autorizado", chat_id)
+    if chat_id is None:
+        logger.debug(
+            "Update sin chat: %s",
+            list(update) if isinstance(update, dict) else type(update),
+        )
+        return
+
+    usuario = await _autorizar(chat_id)
+    if usuario is None:
         return
 
     entrante = extraer_mensaje(update)
 
     if entrante is None:
-        # Puede ser una foto o un sticker (contestamos), o algo sin chat
-        # como un callback de botón o un update de otro tipo (ignoramos).
-        if chat_id is not None:
-            logger.info("Update sin texto en el chat %s", chat_id)
-            await _responder(chat_id, MSG_SOLO_TEXTO)
-        else:
-            logger.debug("Update ignorado: %s", list(update) if isinstance(update, dict) else type(update))
+        # Una foto o un sticker de alguien habilitado: se le contesta.
+        logger.info("Update sin texto en el chat %s", chat_id)
+        await _responder(chat_id, MSG_SOLO_TEXTO)
         return
 
-    chat_id, texto, _ = entrante
-    logger.info("Mensaje de %s: %r", chat_id, texto)
+    # El chat_id se desempaqueta en otra variable y se compara, en vez de pisar
+    # el que ya se autorizó. Hoy las dos funciones de app/telegram.py miran el
+    # mismo campo del update y siempre coinciden; si algún día dejaran de
+    # hacerlo, sin esta comparación estaríamos autorizando un chat y
+    # contestándole a otro, que es la peor forma de romper el aislamiento.
+    chat_del_mensaje, texto, _ = entrante
+    if chat_del_mensaje != chat_id:
+        logger.error(
+            "Update inconsistente: autoricé el chat %s y el mensaje dice %s",
+            chat_id, chat_del_mensaje,
+        )
+        return
+
+    logger.info("Mensaje de %s (%s): %r", chat_id, usuario.email, texto)
 
     # Si el bot dejó una pregunta abierta ("¿a cuál de los dos?"), el mensaje
     # puede ser la respuesta. Va antes que todo lo demás porque un "1" o un
@@ -397,7 +479,9 @@ async def procesar_update(update: Any) -> None:
     pendiente = pendientes.mirar(chat_id)
     if pendiente is not None:
         try:
-            respuesta = await _resolver_pendiente(chat_id, pendiente, texto)
+            respuesta = await _resolver_pendiente(
+                chat_id, pendiente, texto, usuario.user_id
+            )
         except Exception:
             logger.exception("Error resolviendo la pregunta pendiente de %s", chat_id)
             pendientes.olvidar(chat_id)
@@ -425,17 +509,29 @@ async def procesar_update(update: Any) -> None:
     # un comando, no algo que haya que interpretar.
     if _es_comando_reto(texto):
         logger.info("Comando de reto de %s: %r", chat_id, texto)
-        await _responder(chat_id, await run_in_threadpool(_atender_reto, chat_id, texto))
+        await _responder(
+            chat_id,
+            await run_in_threadpool(_atender_reto, chat_id, texto, usuario.user_id),
+        )
         return
 
     if _es_comando_recurrentes(texto):
         logger.info("Comando de recurrentes de %s", chat_id)
-        await _responder(chat_id, await run_in_threadpool(_texto_recurrentes))
+        await _responder(
+            chat_id, await run_in_threadpool(_texto_recurrentes, usuario.user_id)
+        )
+        return
+
+    if _es_comando_rendimientos(texto):
+        logger.info("Comando de rendimientos de %s", chat_id)
+        await _responder(chat_id, await run_in_threadpool(_texto_rendimientos))
         return
 
     if es_comando_recordatorio(texto):
         logger.info("Comando de recordatorio de %s: %r", chat_id, texto)
-        respuesta = await run_in_threadpool(atender_comando_recordatorio, chat_id, texto)
+        respuesta = await run_in_threadpool(
+            atender_comando_recordatorio, chat_id, texto, usuario.user_id
+        )
         await _responder(chat_id, respuesta)
         return
 
@@ -454,7 +550,7 @@ async def procesar_update(update: Any) -> None:
         return
 
     try:
-        respuesta = await _resolver(interpretacion, chat_id)
+        respuesta = await _resolver(interpretacion, chat_id, usuario.user_id)
     except Exception:
         logger.exception("Error resolviendo la intención %s", interpretacion.intencion)
         await _responder(chat_id, MSG_ERROR_INTERNO)
@@ -463,47 +559,102 @@ async def procesar_update(update: Any) -> None:
     await _responder(chat_id, respuesta)
 
 
-async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
+async def _autorizar(chat_id: int) -> Usuario | None:
+    """El usuario dueño del chat, o None si el mensaje no se procesa.
+
+    Los cuatro motivos para devolver None terminan en el mismo mensaje neutro:
+
+      - el chat no está en `usuarios_telegram` (nadie lo dio de alta);
+      - está, pero el perfil quedó 'pausado' o 'pendiente';
+      - el vínculo apunta a un usuario sin perfil (base inconsistente);
+      - no se pudo consultar Supabase.
+
+    Que el cuarto caso caiga acá adentro es deliberado: cuando no se sabe de
+    quién es el mensaje, la única respuesta segura es no procesarlo. Un bot que
+    "sigue igual" ante un error de red sería un bot que escribe movimientos sin
+    dueño, o peor, en la cuenta equivocada.
+
+    El precio es que una caída de Supabase se le muestra al usuario como si no
+    tuviera acceso, que es confuso. Es el lado correcto para equivocarse, y el
+    log dice cuál de los cuatro fue.
+    """
+    usuario = await run_in_threadpool(resolver_usuario, chat_id)
+
+    if usuario is not None and usuario.habilitado:
+        # El cerrojo opcional del .env, cuando está puesto. Va DESPUÉS de la
+        # tabla y no antes: así el log de arriba ya dejó constancia de quién
+        # era, y se puede ver que quedó afuera por la lista y no por la base.
+        if CHATS_PERMITIDOS and chat_id not in CHATS_PERMITIDOS:
+            logger.warning(
+                "Chat %s habilitado en la base pero fuera de CHATS_PERMITIDOS", chat_id
+            )
+        else:
+            return usuario
+
+    await _avisar_sin_acceso(chat_id)
+    return None
+
+
+async def _avisar_sin_acceso(chat_id: int) -> None:
+    """Le dice al chat que no tiene acceso, como mucho una vez cada media hora."""
+    ahora = time.monotonic()
+    ultimo = _ultimo_aviso.get(chat_id)
+    if ultimo is not None and ahora - ultimo < ESPERA_SIN_ACCESO:
+        logger.info("Chat %s sin acceso (aviso ya mandado, no repito)", chat_id)
+        return
+
+    _ultimo_aviso[chat_id] = ahora
+    logger.warning("Chat %s sin acceso: le aviso", chat_id)
+    await _responder(chat_id, MSG_SIN_ACCESO.format(chat_id=chat_id))
+
+
+async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) -> str:
     """Ejecuta la intención y devuelve el texto a mandarle al usuario."""
     intencion = interpretacion.intencion
 
     if intencion is Intencion.REGISTRAR:
-        movimiento = await run_in_threadpool(_con_clave_item, interpretacion.movimiento)
+        movimiento = await run_in_threadpool(
+            _con_clave_item, interpretacion.movimiento, user_id
+        )
         if interpretacion.objetivo:
-            return await _registrar_hacia_objetivo(chat_id, movimiento, interpretacion.objetivo)
+            return await _registrar_hacia_objetivo(
+                chat_id, movimiento, interpretacion.objetivo, user_id
+            )
 
         # El aviso se busca ANTES de guardar: si no, la compra recién hecha
         # entraría en su propio historial y se compararía contra sí misma.
-        aviso = await run_in_threadpool(_aviso_de_salto, movimiento)
+        aviso = await run_in_threadpool(_aviso_de_salto, movimiento, user_id)
         # También antes de guardar: el aviso suma el movimiento nuevo a mano,
         # y si ya estuviera en la base lo contaría dos veces.
-        aviso_reto = await run_in_threadpool(_aviso_de_reto, movimiento, chat_id)
-        movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
+        aviso_reto = await run_in_threadpool(_aviso_de_reto, movimiento, chat_id, user_id)
+        movimiento_id = await run_in_threadpool(
+            guardar_movimiento, movimiento, user_id=user_id
+        )
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
         return _confirmacion(movimiento) + aviso + aviso_reto
 
     if intencion is Intencion.REGISTRAR_VARIOS:
-        return await _resolver_varios(interpretacion)
+        return await _resolver_varios(interpretacion, user_id)
 
     if intencion is Intencion.REGISTRAR_INVERSION:
-        return await _resolver_inversion(interpretacion)
+        return await _resolver_inversion(interpretacion, user_id)
 
     if intencion is Intencion.CREAR_ALERTA:
-        return await _resolver_alerta(interpretacion, chat_id)
+        return await _resolver_alerta(interpretacion, chat_id, user_id)
 
     if intencion is Intencion.VER_ALERTAS:
-        return await _texto_alertas(chat_id)
+        return await _texto_alertas(chat_id, user_id)
 
     if intencion is Intencion.SIMULAR_COMPRA:
-        return await run_in_threadpool(_resolver_compra, interpretacion.compra)
+        return await run_in_threadpool(_resolver_compra, interpretacion.compra, user_id)
 
     if intencion is Intencion.COMPARAR_CUOTAS:
         return await _resolver_cuotas(
-            interpretacion.financiacion, interpretacion.faltantes
+            interpretacion.financiacion, interpretacion.faltantes, user_id
         )
 
     if intencion is Intencion.CONSULTA_LIBRE:
-        return await run_in_threadpool(_resolver_plan, interpretacion.plan)
+        return await run_in_threadpool(_resolver_plan, interpretacion.plan, user_id)
 
     if intencion is Intencion.DESCONOCIDA or interpretacion.consulta is None:
         return MSG_NO_ENTENDI
@@ -512,11 +663,11 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
     logger.info("Consulta %s: %s", intencion.value, consulta)
 
     if intencion is Intencion.TOTAL_POR_TIPO:
-        return await run_in_threadpool(_texto_total_por_tipo, consulta)
+        return await run_in_threadpool(_texto_total_por_tipo, consulta, user_id)
     if intencion is Intencion.TOTAL_POR_CATEGORIA:
-        return await run_in_threadpool(_texto_por_categoria, consulta)
+        return await run_in_threadpool(_texto_por_categoria, consulta, user_id)
     if intencion is Intencion.BALANCE:
-        return await run_in_threadpool(_texto_balance, consulta)
+        return await run_in_threadpool(_texto_balance, consulta, user_id)
 
     return MSG_NO_ENTENDI
 
@@ -526,7 +677,9 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int) -> str:
 # --------------------------------------------------------------------------
 
 
-async def _resolver_alerta(interpretacion: Interpretacion, chat_id: int) -> str:
+async def _resolver_alerta(
+    interpretacion: Interpretacion, chat_id: int, user_id: str
+) -> str:
     """Crea la alerta, o pregunta lo que falte."""
     if interpretacion.faltantes or not interpretacion.alerta:
         return _pedir_faltantes_alerta(interpretacion.faltantes)
@@ -554,7 +707,12 @@ async def _resolver_alerta(interpretacion: Interpretacion, chat_id: int) -> str:
         logger.info("Alerta sobre %s sin precio de referencia: %s", alerta.ticker, exc)
 
     fila = await run_in_threadpool(
-        crear_alerta, alerta, chat_id=chat_id, referencia=referencia, moneda=moneda
+        crear_alerta,
+        alerta,
+        user_id=user_id,
+        chat_id=chat_id,
+        referencia=referencia,
+        moneda=moneda,
     )
     logger.info("Alerta %s creada para %s", fila.get("id"), alerta.ticker)
     return _confirmacion_alerta(alerta, referencia, moneda)
@@ -600,9 +758,9 @@ def _confirmacion_alerta(alerta: Alerta, referencia: Decimal | None, moneda: str
     ).replace("  ", " ")
 
 
-async def _texto_alertas(chat_id: int) -> str:
+async def _texto_alertas(chat_id: int, user_id: str) -> str:
     """Las alertas activas de este chat."""
-    filas = await run_in_threadpool(alertas_de_chat, chat_id)
+    filas = await run_in_threadpool(alertas_de_chat, chat_id, user_id=user_id)
     if not filas:
         return (
             "No tenés alertas activas.\n\n"
@@ -622,7 +780,7 @@ async def _texto_alertas(chat_id: int) -> str:
 
 
 async def _resolver_cuotas(
-    financiacion: Financiacion | None, faltantes: tuple[str, ...]
+    financiacion: Financiacion | None, faltantes: tuple[str, ...], user_id: str
 ) -> str:
     """Compara cuotas contra contado. No registra nada: todavía no compró.
 
@@ -642,7 +800,9 @@ async def _resolver_cuotas(
     comparacion = comparar_cuotas(financiacion, tasas)
 
     try:
-        tiene_inversiones = bool(await run_in_threadpool(obtener_inversiones, limite=1))
+        tiene_inversiones = bool(
+            await run_in_threadpool(obtener_inversiones, user_id=user_id, limite=1)
+        )
     except Exception:
         logger.warning("No pude ver si tiene inversiones", exc_info=True)
         tiene_inversiones = False
@@ -653,7 +813,7 @@ async def _resolver_cuotas(
     cartera = None
     if tiene_inversiones and financiacion.tasa_mensual is None:
         try:
-            cartera = await rendimiento_cartera(financiacion.moneda)
+            cartera = await rendimiento_cartera(financiacion.moneda, user_id=user_id)
         except Exception:
             # Que no se pueda cotizar la cartera no puede dejar sin respuesta
             # una cuenta que ya está hecha con la tasa de plazo fijo.
@@ -662,16 +822,16 @@ async def _resolver_cuotas(
     return redactar_cuotas(comparacion, _formatear_monto, tiene_inversiones, cartera)
 
 
-def _resolver_compra(compra: CompraHipotetica | None) -> str:
+def _resolver_compra(compra: CompraHipotetica | None, user_id: str) -> str:
     """Analiza una compra hipotética. NO la registra: no pasó todavía."""
     if compra is None:
         return MSG_NO_ENTENDI
 
     logger.info("Compra hipotética: %s %s (%s)", compra.monto, compra.moneda.value, compra.que)
-    return redactar_analisis(analizar_compra(compra), _formatear_monto)
+    return redactar_analisis(analizar_compra(compra, user_id=user_id), _formatear_monto)
 
 
-def _resolver_plan(plan: PlanConsulta | None) -> str:
+def _resolver_plan(plan: PlanConsulta | None, user_id: str) -> str:
     """Ejecuta una pregunta analítica libre y devuelve la respuesta redactada.
 
     Si el plan pide comparar, se ejecuta DOS veces —una por período— y la
@@ -683,9 +843,11 @@ def _resolver_plan(plan: PlanConsulta | None) -> str:
 
     logger.info("Consulta libre: %s", plan.model_dump(exclude_defaults=True))
 
-    resultado = ejecutar_plan(plan)
+    resultado = ejecutar_plan(plan, user_id=user_id)
     comparacion = (
-        ejecutar_plan(plan, plan.comparar_con) if plan.comparar_con else None
+        ejecutar_plan(plan, plan.comparar_con, user_id=user_id)
+        if plan.comparar_con
+        else None
     )
     return redactar_plan(plan, resultado, _formatear_monto, comparacion)
 
@@ -697,7 +859,7 @@ def _es_comando_reto(texto: str) -> bool:
     return (texto or "").strip().lower().split("@", 1)[0] in _COMANDOS_RETO
 
 
-def _atender_reto(chat_id: int, texto: str) -> str:
+def _atender_reto(chat_id: int, texto: str, user_id: str) -> str:
     """Propone, acepta o informa el reto. Todo en un comando por simplicidad.
 
     Antes que nada revisa el reto abierto: si ya se cerró —por gasto o por
@@ -706,9 +868,9 @@ def _atender_reto(chat_id: int, texto: str) -> str:
     """
     comando = texto.strip().lower().split("@", 1)[0]
 
-    abierto = reto_activo(chat_id)
+    abierto = reto_activo(chat_id, user_id=user_id)
     if abierto:
-        gastado = gastado_en_reto(abierto)
+        gastado = gastado_en_reto(abierto, user_id=user_id)
         nuevo = revisar_reto(abierto, gastado)
         if nuevo:
             cerrar_reto(abierto["id"], nuevo, gastado)
@@ -718,7 +880,7 @@ def _atender_reto(chat_id: int, texto: str) -> str:
         # Sigue abierto: no se propone otro encima.
         return texto_activo(abierto, gastado, _formatear_monto, Moneda(abierto.get("moneda", "ARS")))
 
-    filas = movimientos_para_termometro()
+    filas = movimientos_para_termometro(user_id=user_id)
     conteo: dict[str, int] = {}
     for fila in filas:
         conteo[fila.get("moneda", "ARS")] = conteo.get(fila.get("moneda", "ARS"), 0) + 1
@@ -737,6 +899,7 @@ def _atender_reto(chat_id: int, texto: str) -> str:
     try:
         reto = crear_reto(
             chat_id,
+            user_id=user_id,
             categoria=propuesta.categoria,
             ahorro_estimado=propuesta.ahorro_estimado,
             moneda=moneda.value,
@@ -750,16 +913,16 @@ def _atender_reto(chat_id: int, texto: str) -> str:
     return texto_aceptado(reto, _formatear_monto, moneda)
 
 
-def _aviso_de_reto(movimiento: Movimiento, chat_id: int) -> str:
+def _aviso_de_reto(movimiento: Movimiento, chat_id: int, user_id: str) -> str:
     """Si el gasto rompe un reto activo, se dice al confirmarlo."""
     if movimiento.tipo is not TipoMovimiento.GASTO:
         return ""
 
-    abierto = reto_activo(chat_id)
+    abierto = reto_activo(chat_id, user_id=user_id)
     if not abierto or abierto.get("categoria") != movimiento.categoria:
         return ""
 
-    gastado = gastado_en_reto(abierto) + movimiento.monto
+    gastado = gastado_en_reto(abierto, user_id=user_id) + movimiento.monto
     nuevo = revisar_reto(abierto, gastado)
     if nuevo != "fallido":
         return ""
@@ -779,10 +942,10 @@ def _es_comando_recurrentes(texto: str) -> bool:
     return clave in _COMANDOS_RECURRENTES
 
 
-def _texto_recurrentes() -> str:
+def _texto_recurrentes(user_id: str) -> str:
     """Los cargos que se repiten, con la sugerencia de revisarlos."""
     try:
-        filas = movimientos_para_termometro()
+        filas = movimientos_para_termometro(user_id=user_id)
     except Exception:
         logger.exception("No pude leer los movimientos para recurrentes")
         return MSG_ERROR_INTERNO
@@ -798,7 +961,89 @@ def _texto_recurrentes() -> str:
     return redactar_recurrentes(encontrados, moneda, _formatear_monto)
 
 
-def _con_clave_item(movimiento: Movimiento | None) -> Movimiento | None:
+_COMANDOS_RENDIMIENTOS = frozenset({
+    "/rendimientos", "/billeteras", "/tasas",
+})
+
+# Cuántas mostrar por Telegram. La web las lista todas; acá un mensaje con
+# treinta filas no se lee, y lo que se quiere saber es quién paga más.
+TOPE_RENDIMIENTOS = 10
+
+
+def _es_comando_rendimientos(texto: str) -> bool:
+    clave = (texto or "").strip().lower().split("@", 1)[0]
+    return clave in _COMANDOS_RENDIMIENTOS
+
+
+def _texto_rendimientos() -> str:
+    """El ranking de billeteras por TNA, con la fecha del dato bien visible.
+
+    La fecha no es un adorno: estas tasas las refresca un cron contra una API de
+    terceros, y si esa fuente se rompe el usuario tiene que poder darse cuenta
+    de que está mirando algo viejo antes de mover la plata.
+    """
+    filas = obtener_rendimientos(limite=TOPE_RENDIMIENTOS)
+
+    if not filas:
+        return (
+            "Todavía no tengo tasas de billeteras cargadas 🤷\n\n"
+            "Las actualiza un proceso automático una vez por día. Si recién "
+            "arrancaste, esperá a la próxima corrida."
+        )
+
+    # La más VIEJA de todas, no la más nueva: si una sola quedó atrasada, el
+    # conjunto está atrasado. Redondear para el lado optimista sería justo lo
+    # que hace que un dato podrido pase desapercibido.
+    fechas = [f["fecha_actualizacion"] for f in filas if f.get("fecha_actualizacion")]
+    mas_vieja = min(fechas) if fechas else None
+
+    lineas = ["💰 Rendimientos de billeteras\n"]
+
+    for puesto, fila in enumerate(filas, start=1):
+        try:
+            tna = Decimal(str(fila["tna"]))
+        except (KeyError, ValueError, ArithmeticError):
+            continue
+
+        # Coma decimal, como todos los números que manda el bot.
+        tna_txt = f"{tna:.2f}".replace(".", ",")
+        # La TNA es nominal con capitalización a 30 días: el mes es TNA/12.
+        # Mismo criterio que app/tasas.py, para que los dos digan lo mismo.
+        mensual = f"{tna / 12:.2f}".replace(".", ",")
+
+        medalla = {1: "🥇", 2: "🥈", 3: "🥉"}.get(puesto, "  ")
+        linea = f"{medalla} {fila['nombre']} — {tna_txt}% TNA ({mensual}% mensual)"
+
+        tope = fila.get("tope_monto")
+        if tope:
+            try:
+                linea += f"\n     hasta {_formatear_monto(Decimal(str(tope)), Moneda.ARS)}"
+            except (ValueError, ArithmeticError):
+                pass
+
+        lineas.append(linea)
+
+    if mas_vieja:
+        try:
+            dia = date.fromisoformat(mas_vieja)
+            lineas.append(f"\n📅 Tasas al {dia.strftime('%d/%m/%Y')}")
+            atraso = (date.today() - dia).days
+            if atraso > 7:
+                lineas.append(
+                    f"⚠️ Hace {atraso} días que no se actualizan. "
+                    "Puede que la fuente esté caída: verificá antes de mover plata."
+                )
+        except ValueError:
+            pass
+
+    lineas.append(
+        "\nSon rendimientos variables y no garantizados. La mayoría sale de un "
+        "fondo común de dinero, así que la tasa cambia todos los días."
+    )
+    return "\n".join(lineas)
+
+
+def _con_clave_item(movimiento: Movimiento | None, user_id: str) -> Movimiento | None:
     """Le agrega al movimiento la clave con la que se agrupa su ítem.
 
     Se calcula ACÁ y se guarda en la fila, en vez de derivarla al consultar:
@@ -813,7 +1058,7 @@ def _con_clave_item(movimiento: Movimiento | None) -> Movimiento | None:
         clave = clave_para(
             descripcion=movimiento.descripcion,
             comercio=movimiento.comercio,
-            conocidas=claves_de_items(),
+            conocidas=claves_de_items(user_id=user_id),
         )
     except Exception:
         logger.warning("No pude calcular la clave del ítem", exc_info=True)
@@ -822,7 +1067,7 @@ def _con_clave_item(movimiento: Movimiento | None) -> Movimiento | None:
     return movimiento.model_copy(update={"clave_item": clave or None})
 
 
-def _aviso_de_salto(movimiento: Movimiento) -> str:
+def _aviso_de_salto(movimiento: Movimiento, user_id: str) -> str:
     """La línea extra cuando el ítem se despegó de lo que venía saliendo.
 
     Se compara precio unitario contra precio unitario, o total contra total,
@@ -833,7 +1078,7 @@ def _aviso_de_salto(movimiento: Movimiento) -> str:
         return ""
 
     try:
-        historial = historial_de_item(movimiento.clave_item)
+        historial = historial_de_item(movimiento.clave_item, user_id=user_id)
     except Exception:
         logger.warning("No pude revisar el historial del ítem", exc_info=True)
         return ""
@@ -876,7 +1121,7 @@ def _aviso_de_salto(movimiento: Movimiento) -> str:
     )
 
 
-async def _resolver_varios(interpretacion: Interpretacion) -> str:
+async def _resolver_varios(interpretacion: Interpretacion, user_id: str) -> str:
     """Guarda los movimientos que vinieron completos y pregunta por el resto.
 
     Lo que está claro se guarda SIEMPRE, aunque otro ítem del mismo mensaje
@@ -889,7 +1134,7 @@ async def _resolver_varios(interpretacion: Interpretacion) -> str:
     if not movimientos:
         return _texto_dudas(dudas, ninguno_guardado=True)
 
-    ids = await run_in_threadpool(guardar_movimientos, movimientos)
+    ids = await run_in_threadpool(guardar_movimientos, movimientos, user_id=user_id)
     logger.info("Movimientos guardados en lote: %s", ids)
 
     return _texto_resumen(movimientos, dudas)
@@ -947,13 +1192,15 @@ def _texto_dudas(dudas: tuple[tuple[str, str], ...], ninguno_guardado: bool = Fa
     return "\n".join([cabeza, *cuerpo] + ([pie] if pie else []))
 
 
-async def _resolver_inversion(interpretacion: Interpretacion) -> str:
+async def _resolver_inversion(interpretacion: Interpretacion, user_id: str) -> str:
     """Guarda la compra, o pregunta por lo que falte en vez de inventarlo."""
     if interpretacion.faltantes:
         return _pedir_faltantes(interpretacion.faltantes)
 
     inversion = interpretacion.inversion
-    inversion_id = await run_in_threadpool(guardar_inversion, inversion)
+    inversion_id = await run_in_threadpool(
+        guardar_inversion, inversion, user_id=user_id
+    )
     logger.info("Inversión %s guardada: %s", inversion_id, inversion)
     return _confirmacion_inversion(inversion)
 
@@ -1018,25 +1265,31 @@ def _formatear_cantidad(cantidad: Decimal) -> str:
 # --------------------------------------------------------------------------
 
 
-async def _registrar_hacia_objetivo(chat_id: int, movimiento: Movimiento, mencion: str) -> str:
+async def _registrar_hacia_objetivo(
+    chat_id: int, movimiento: Movimiento, mencion: str, user_id: str
+) -> str:
     """Guarda el ahorro y, si puede, lo imputa. Si no, pregunta.
 
     El movimiento se guarda SIEMPRE, incluso cuando hay que preguntar: la plata
     se apartó igual, y perder el registro por una duda sobre a qué objetivo va
     sería el peor de los resultados.
     """
-    objetivos = await run_in_threadpool(obtener_objetivos)
+    objetivos = await run_in_threadpool(obtener_objetivos, user_id=user_id)
     coincidencias = buscar(mencion, objetivos)
 
     # Un solo objetivo coincide: es el único caso en que se puede imputar sin
     # preguntar nada.
     if coincidencias.unico is not None:
         objetivo = coincidencias.unico
-        movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento, objetivo["id"])
+        movimiento_id = await run_in_threadpool(
+            guardar_movimiento, movimiento, objetivo["id"], user_id=user_id
+        )
         logger.info("Movimiento %s imputado a %r", movimiento_id, objetivo["nombre"])
-        return await _texto_progreso(movimiento, objetivo)
+        return await _texto_progreso(movimiento, objetivo, user_id)
 
-    movimiento_id = await run_in_threadpool(guardar_movimiento, movimiento)
+    movimiento_id = await run_in_threadpool(
+        guardar_movimiento, movimiento, user_id=user_id
+    )
     logger.info("Movimiento %s guardado sin imputar (mención %r)", movimiento_id, mencion)
 
     if coincidencias.hay_varios:
@@ -1076,7 +1329,9 @@ async def _registrar_hacia_objetivo(chat_id: int, movimiento: Movimiento, mencio
     )
 
 
-async def _resolver_pendiente(chat_id: int, pendiente, texto: str) -> str | None:
+async def _resolver_pendiente(
+    chat_id: int, pendiente, texto: str, user_id: str
+) -> str | None:
     """Contesta la pregunta abierta, o None si el mensaje no la contestaba.
 
     None es importante: significa "esto era otra cosa", y el mensaje sigue al
@@ -1095,8 +1350,10 @@ async def _resolver_pendiente(chat_id: int, pendiente, texto: str) -> str | None
             return None
 
         pendientes.olvidar(chat_id)
-        await run_in_threadpool(imputar_movimiento, pendiente.movimiento_id, elegido["id"])
-        return await _texto_progreso(None, elegido)
+        await run_in_threadpool(
+            imputar_movimiento, pendiente.movimiento_id, elegido["id"], user_id=user_id
+        )
+        return await _texto_progreso(None, elegido, user_id)
 
     # tipo == "crear"
     monto = parsear_monto(texto)
@@ -1106,6 +1363,7 @@ async def _resolver_pendiente(chat_id: int, pendiente, texto: str) -> str | None
     try:
         objetivo = await run_in_threadpool(
             crear_objetivo,
+            user_id=user_id,
             nombre=pendiente.mencion,
             monto_objetivo=monto,
             moneda=Moneda(pendiente.moneda),
@@ -1116,8 +1374,13 @@ async def _resolver_pendiente(chat_id: int, pendiente, texto: str) -> str | None
         return f"No pude crear el objetivo 😕\n{exc}"
 
     pendientes.olvidar(chat_id)
-    await run_in_threadpool(imputar_movimiento, pendiente.movimiento_id, objetivo["id"])
-    return f"Creé el objetivo «{objetivo['nombre']}» 🎯\n\n" + await _texto_progreso(None, objetivo)
+    await run_in_threadpool(
+        imputar_movimiento, pendiente.movimiento_id, objetivo["id"], user_id=user_id
+    )
+    return (
+        f"Creé el objetivo «{objetivo['nombre']}» 🎯\n\n"
+        + await _texto_progreso(None, objetivo, user_id)
+    )
 
 
 def _elegir_candidato(pendiente, respuesta: str) -> dict | None:
@@ -1132,10 +1395,14 @@ def _elegir_candidato(pendiente, respuesta: str) -> dict | None:
     return buscar(respuesta, pendiente.candidatos).unico
 
 
-async def _texto_progreso(movimiento: Movimiento | None, objetivo: dict) -> str:
+async def _texto_progreso(
+    movimiento: Movimiento | None, objetivo: dict, user_id: str
+) -> str:
     """Ej: 'Sumé $150.000 al objetivo «Viaje a Europa». Vas 60%, te faltan $100.000.'"""
     moneda = Moneda(objetivo["moneda"])
-    aportado = await run_in_threadpool(total_imputado, objetivo["id"], moneda)
+    aportado = await run_in_threadpool(
+        total_imputado, objetivo["id"], moneda, user_id=user_id
+    )
     meta = Decimal(str(objetivo["monto_objetivo"]))
     porcentaje, falta, completo = progreso(aportado, meta)
 
@@ -1185,9 +1452,10 @@ _ETIQUETA_TIPO = {
 }
 
 
-def _texto_total_por_tipo(consulta: Consulta) -> str:
+def _texto_total_por_tipo(consulta: Consulta, user_id: str) -> str:
     """Ej: '💸 Gastaste $123.400 este mes (14 movimientos)'."""
     totales = totales_por_moneda(
+        user_id=user_id,
         desde=consulta.desde,
         hasta=consulta.hasta,
         tipo=consulta.tipo,
@@ -1206,9 +1474,10 @@ def _texto_total_por_tipo(consulta: Consulta) -> str:
     return "\n".join(lineas)
 
 
-def _texto_por_categoria(consulta: Consulta) -> str:
+def _texto_por_categoria(consulta: Consulta, user_id: str) -> str:
     """Desglose por rubro, de mayor a menor, con el total al final."""
     desglose = totales_por_categoria(
+        user_id=user_id,
         desde=consulta.desde,
         hasta=consulta.hasta,
         tipo=consulta.tipo,
@@ -1241,10 +1510,13 @@ def _texto_por_categoria(consulta: Consulta) -> str:
     return "\n".join(lineas)
 
 
-def _texto_balance(consulta: Consulta) -> str:
+def _texto_balance(consulta: Consulta, user_id: str) -> str:
     """Ingresos, gastos y la diferencia, por moneda."""
     resultado = balance(
-        desde=consulta.desde, hasta=consulta.hasta, moneda=consulta.moneda
+        user_id=user_id,
+        desde=consulta.desde,
+        hasta=consulta.hasta,
+        moneda=consulta.moneda,
     )
     if not resultado:
         return _sin_datos(consulta)

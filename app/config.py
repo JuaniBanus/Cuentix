@@ -39,15 +39,15 @@ def _opcional(nombre: str) -> str | None:
     return (os.getenv(nombre) or "").strip() or None
 
 
-def _requerida_chat_ids(nombre: str) -> frozenset[int]:
+def _chat_ids(nombre: str) -> frozenset[int]:
     """Lee una lista de chat_id separados por coma y la devuelve como enteros.
 
-    Falla si está vacía o si algún valor no es un número: dejar la lista vacía
-    equivaldría a abrir el bot a cualquiera, y eso tiene que ser una decisión
-    explícita y no el resultado de un typo.
+    Vacía es válido y significa "sin lista": quién puede usar el bot lo decide
+    la tabla `usuarios_telegram`. Un valor que no sea número sí corta, porque
+    eso no es una decisión, es un typo que dejaría a alguien afuera en silencio.
     """
     ids = set()
-    for parte in _requerida(nombre).split(","):
+    for parte in (_opcional(nombre) or "").split(","):
         parte = parte.strip()
         if not parte:
             continue
@@ -58,8 +58,6 @@ def _requerida_chat_ids(nombre: str) -> frozenset[int]:
                 f"{nombre} tiene un valor que no es un número: {parte!r}.\n"
                 f"Es una lista de chat_id separados por coma, por ejemplo: 123456789"
             ) from None
-    if not ids:
-        raise ConfigError(f"{nombre} no tiene ningún chat_id.")
     return frozenset(ids)
 
 
@@ -77,28 +75,23 @@ WEBHOOK_SECRET: str = _requerida("WEBHOOK_SECRET")
 SUPABASE_URL: str = _requerida("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY: str = _requerida("SUPABASE_KEY")
 
-# Quiénes pueden usar el bot. El username de un bot es público, así que
-# cualquiera que lo encuentre puede escribirle; sin esta lista sus movimientos
-# se mezclarían con los propios en la misma tabla. Para sumar a alguien, se
-# agrega su chat_id separado por coma.
-CHATS_PERMITIDOS: frozenset[int] = _requerida_chat_ids("CHATS_PERMITIDOS")
-
-# UUID del usuario de Supabase dueño de las filas que escribe el bot:
-# los objetivos de ahorro y las inversiones.
+# Quiénes pueden usar el bot: YA NO SE DECIDE ACÁ.
 #
-# Las dos tablas tienen `user_id uuid not null default auth.uid()`, pero ese
-# default solo se completa cuando el INSERT viaja con el JWT de un usuario
-# logueado. El bot escribe con service_role, donde auth.uid() es NULL, así que
-# tiene que mandarlo explícito o el insert falla.
+# Ahora la lista de acceso es la tabla `usuarios_telegram`, que además dice de
+# QUIÉN es cada chat. Una lista de chat_id en el .env no puede hacer eso: sabe
+# quién entra, no a nombre de quién guardar. Ver app/usuarios.py.
 #
-# Es el id del usuario de la web, en Supabase -> Authentication -> Users -> UID,
-# o con:
-#   select id, email from auth.users;
+# Esta variable queda como un cerrojo opcional ADICIONAL, no como el principal:
 #
-# Es opcional a propósito: sin esto el bot lee objetivos e imputa ahorros igual,
-# y solo se rechazan las operaciones que crean filas nuevas (objetivos nuevos y
-# compras de inversión), con un mensaje que explica qué configurar.
-SUPABASE_USER_ID: str | None = _opcional("SUPABASE_USER_ID")
+#   vacía (lo normal)  -> manda la tabla, y punto.
+#   con chat_ids       -> además de estar en la tabla, hay que estar acá.
+#
+# La segunda forma sirve para una etapa de prueba, donde se quiere que el bot
+# atienda a dos personas aunque la tabla ya tenga diez. Tiene un costo que
+# conviene saber: sumar un usuario pasa a ser dos pasos, y olvidarse del
+# segundo se ve como un "no tengo tu acceso habilitado" que no se explica
+# mirando la base. Por eso el arranque loguea cuál de los dos modos está activo.
+CHATS_PERMITIDOS: frozenset[int] = _chat_ids("CHATS_PERMITIDOS")
 
 # Secreto que protege el disparador de las alertas de precio.
 #

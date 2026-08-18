@@ -78,9 +78,15 @@ Si algún ítem me deja dudando, pregunto SOLO por ese y el resto queda anotado.
 Y si querés, te escribo yo: /recordatorio 21 y todas las noches a esa hora
 te pregunto cómo te fue.
 
+💰 DÓNDE RINDE MÁS LA PLATA
+/rendimientos — el ranking de billeteras virtuales por TNA, con cuánto
+paga cada una por mes y desde cuándo es el dato.
+Las tasas se actualizan solas una vez por día.
+
 ⚙️ COMANDOS
 /start — presentación
 /ayuda — esta ayuda
+/rendimientos — comparar billeteras virtuales
 /recordatorio — ver si tenés recordatorio diario
 /recordatorio 21 — que te escriba a esa hora
 /recordatorio off — apagarlo
