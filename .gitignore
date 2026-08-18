@@ -3,6 +3,14 @@ venv/
 .venv/
 env/
 
+# Restos de un venv que quedó ilegible por corrupción de NTFS en el disco E:.
+# Git tampoco lo puede leer, así que sin esto ensucia `git status` y puede
+# hacer fallar comandos que recorren el árbol.
+#
+# Se borra solo después de correr, como administrador:  chkdsk E: /f
+# Una vez que ande, esta línea se puede sacar.
+.venv_danado/
+
 # Variables de entorno
 .env
 .env.*

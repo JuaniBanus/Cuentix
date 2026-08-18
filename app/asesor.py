@@ -64,7 +64,9 @@ def _suma(filas: list[dict], tipo: str, moneda: Moneda) -> Decimal:
     )
 
 
-def analizar(compra: CompraHipotetica, hoy: date | None = None) -> Analisis:
+def analizar(
+    compra: CompraHipotetica, hoy: date | None = None, *, user_id: str
+) -> Analisis:
     """Calcula el impacto de la compra sobre la situación actual.
 
     Todo se mide en la moneda de la compra: mezclar pesos con dólares para
@@ -79,7 +81,9 @@ def analizar(compra: CompraHipotetica, hoy: date | None = None) -> Analisis:
 
     # Una sola lectura para las dos ventanas: el mes está contenido en los 60
     # días, así que pedir dos veces sería pagar dos viajes por lo mismo.
-    filas = movimientos_para_analisis(desde=desde_historia, hasta=hoy, moneda=moneda)
+    filas = movimientos_para_analisis(
+        user_id=user_id, desde=desde_historia, hasta=hoy, moneda=moneda
+    )
     del_mes = [f for f in filas if f["fecha"] >= inicio_mes.isoformat()]
 
     analisis.gastado_mes = _suma(del_mes, TipoMovimiento.GASTO.value, moneda)
@@ -107,7 +111,7 @@ def analizar(compra: CompraHipotetica, hoy: date | None = None) -> Analisis:
             Decimal("0"),
         )
 
-    analisis.metas = _impacto_en_metas(compra, filas, dias_reales)
+    analisis.metas = _impacto_en_metas(compra, filas, dias_reales, user_id)
     return analisis
 
 
@@ -128,7 +132,7 @@ def _primer_dia(filas: list[dict], por_defecto: date) -> date:
 
 
 def _impacto_en_metas(
-    compra: CompraHipotetica, filas: list[dict], dias: int
+    compra: CompraHipotetica, filas: list[dict], dias: int, user_id: str
 ) -> list[tuple[str, Decimal, Decimal | None, Decimal | None]]:
     """Cuánto se atrasaría cada meta si esa plata no se ahorra.
 
@@ -137,7 +141,7 @@ def _impacto_en_metas(
     en el texto: supone que el ritmo se mantiene, que nunca es del todo cierto.
     """
     try:
-        objetivos = obtener_objetivos(solo_activos=True)
+        objetivos = obtener_objetivos(user_id=user_id, solo_activos=True)
     except Exception:
         logger.exception("No pude leer los objetivos para el análisis")
         return []
@@ -155,7 +159,7 @@ def _impacto_en_metas(
             continue  # una meta en dólares no se atrasa por un gasto en pesos
         try:
             meta = Decimal(str(objetivo["monto_objetivo"]))
-            aportado = total_imputado(objetivo["id"], compra.moneda)
+            aportado = total_imputado(objetivo["id"], compra.moneda, user_id=user_id)
         except Exception:
             logger.exception("No pude calcular el progreso de %s", objetivo.get("nombre"))
             continue
