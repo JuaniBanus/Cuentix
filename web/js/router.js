@@ -125,6 +125,7 @@ export function pintar(conEntrada = false) {
     errorNarrativa: estado.errorNarrativa,
     mesAbierto: estado.mesAbierto,
     retos: estado.retos,
+    rendimientos: estado.rendimientos,
     dolar: estado.dolar,
     casaDolar: estado.casaDolar,
     setCasaDolar: acciones.setCasaDolar,
