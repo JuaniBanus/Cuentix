@@ -1,0 +1,75 @@
+# Actualiza las TNA de las billeteras virtuales, una vez por día.
+#
+# Mismo motivo que el cron de alertas para vivir acá y no adentro del bot: el
+# servicio de Render duerme tras ~15 minutos sin tráfico, y un scheduler interno
+# se congela junto con él. Hace falta un disparo desde afuera.
+#
+# POR QUÉ UNA VEZ POR DÍA Y NO MÁS SEGUIDO
+#
+# Porque el dato de origen cambia una vez por día y nada más. Los fondos comunes
+# publican el valor de la cuotaparte al cierre, así que pedirlo cada hora sería
+# bajar 33 MB veinticuatro veces para guardar el mismo número. La fecha que
+# muestra la pantalla es la del DATO, no la de la corrida: refrescar más seguido
+# no la haría más fresca.
+
+name: Rendimientos de billeteras
+
+on:
+  schedule:
+    # 12:00 UTC = 9 de la mañana en Argentina. La CAFCI publica el cierre del
+    # día hábil anterior por la mañana, así que a esta hora el dato ya está.
+    # Todos los días y no solo hábiles: el lunes tiene que traer el viernes.
+    - cron: "0 12 * * *"
+  # Para poder correrlo a mano desde la pestaña Actions la primera vez, sin
+  # esperar al reloj: si no, la tabla queda vacía hasta mañana.
+  workflow_dispatch:
+
+concurrency:
+  group: rendimientos
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Traer las tasas
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          ALERTAS_SECRET: ${{ secrets.ALERTAS_SECRET }}
+        run: |
+          if [ -z "$BACKEND_URL" ] || [ -z "$ALERTAS_SECRET" ]; then
+            echo "Faltan los secrets BACKEND_URL o ALERTAS_SECRET del repositorio."
+            exit 1
+          fi
+
+          # --max-time bien largo: entre despertar Render y bajar los 33 MB de
+          # JSON de la CAFCI, esta tarea tarda bastante más que la de alertas.
+          #
+          # El secreto va en la URL, así que -s y --output evitan que aparezca
+          # en el log de la corrida, que es público en un repo público.
+          codigo=$(curl -s -X POST \
+            --max-time 300 \
+            --retry 2 --retry-delay 30 --retry-connrefused \
+            -o respuesta.json -w "%{http_code}" \
+            "$BACKEND_URL/tareas/rendimientos/$ALERTAS_SECRET")
+
+          echo "HTTP $codigo"
+          cat respuesta.json
+          echo
+
+          if [ "$codigo" = "404" ]; then
+            echo "El secreto no coincide con ALERTAS_SECRET del servidor."
+            exit 1
+          fi
+          [ "$codigo" = "200" ] || exit 1
+
+          # El endpoint contesta 200 con ok:false cuando la fuente de terceros
+          # falló pero lo nuestro anda. Se marca la corrida como fallida igual,
+          # para que el aviso de GitHub llegue: si no, el scraper podría quedar
+          # roto meses y la única señal sería la fecha vieja en pantalla, que
+          # justamente es lo que nadie mira hasta que importa.
+          if grep -q '"ok":[[:space:]]*false' respuesta.json; then
+            echo "La actualización terminó con problemas (ver arriba)."
+            echo "Las tasas anteriores siguen intactas, con su fecha original."
+            exit 1
+          fi
