@@ -538,6 +538,17 @@ alter table public.movimientos enable row level security;
 
 -- La vieja: `using (true)`, todos ven todo. Es exactamente el agujero que
 -- avisaba el comentario de schema.sql. Se va.
+--
+-- OJO CON ESTE `drop policy if exists`: borra POR NOMBRE, y solo por el nombre
+-- que está escrito acá. Si en la base la policy vieja se llama de otra forma
+-- —creada a mano, o con una versión anterior de schema.sql—, esto no encuentra
+-- nada, no avisa, y la permisiva sobrevive al lado de las nuevas. Como las
+-- policies permisivas se combinan con OR, una sola `using (true)` que quede
+-- vuelve inútiles a las otras cuatro.
+--
+-- Pasó de verdad. El arreglo, que busca por lo que las policies HACEN en vez de
+-- por cómo se llaman, está en migrations/012_barrer_policies_permisivas.sql.
+-- Correr esa después de esta, siempre.
 drop policy if exists "movimientos: leer con sesión"    on public.movimientos;
 drop policy if exists "movimientos: leer los propios"   on public.movimientos;
 drop policy if exists "movimientos: crear propios"      on public.movimientos;
