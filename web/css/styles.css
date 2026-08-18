@@ -1329,6 +1329,128 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dolar-grafico { margin-top: 6px; }
 .dolar-linea { width: 100%; height: auto; display: block; overflow: visible; }
 
+/* --------------------------------------------- Rendimientos de billeteras */
+/*
+ * Misma tabla-lista que el dólar, con una columna más: acá cada fila tiene que
+ * decir tres cosas (quién, qué tasa, cuánto ganás) contra las dos de allá.
+ *
+ * La fecha va arriba de todo y no al pie con la letra chica de la fuente. Es el
+ * único dato que delata que el cron se rompió, y al pie no la mira nadie.
+ */
+
+.rend-fecha {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 2px 0 12px;
+  font-size: 13px; color: var(--tenue);
+}
+.rend-fecha strong { color: var(--texto); font-weight: 600; }
+/* Ámbar y no rojo: las tasas viejas siguen siendo utilizables, solo hay que
+   mirarlas con desconfianza. El rojo diría "esto está roto". */
+.rend-fecha.es-vieja { color: #d8a24a; }
+.rend-fecha.es-vieja strong { color: #d8a24a; }
+.rend-alerta { color: #d8a24a; margin-bottom: 12px; line-height: 1.5; }
+
+.rend-simulador {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px;
+  background: var(--realce);
+  border-radius: var(--r-boton);
+}
+.rend-label { font-size: 13.5px; color: var(--tenue); }
+/* Se va al final de la fila para que "Si pongo [ $ ___ ] gano por mes" se lea
+   como una frase y no como un formulario con dos etiquetas sueltas. */
+.rend-label-fin { margin-left: auto; }
+
+.rend-input-grupo {
+  display: flex; align-items: center; gap: 2px;
+  padding: 6px 10px;
+  background: var(--superficie);
+  border: 1px solid var(--borde-campo);
+  border-radius: var(--r-boton);
+  transition: box-shadow .15s var(--curva), border-color .15s var(--curva);
+}
+.rend-input-grupo:focus-within {
+  border-color: var(--acento);
+  box-shadow: var(--acento-halo);
+}
+.rend-signo { font-size: 15px; color: var(--tenue); }
+.rend-input {
+  width: 8ch;
+  background: transparent; border: 0; outline: 0;
+  color: var(--texto);
+  font: inherit; font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Las flechitas del number roban ancho y en mobile no se usan. El input queda
+   como number igual por el teclado numérico que abre. */
+.rend-input::-webkit-outer-spin-button,
+.rend-input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.rend-input { -moz-appearance: textfield; }
+
+.rend-tabla {
+  display: flex; flex-direction: column;
+  margin: 12px 0 4px;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--r-tarjeta);
+  overflow: hidden;
+  list-style: none;
+}
+
+.rend-fila {
+  display: grid; grid-template-columns: 1fr auto auto;
+  align-items: center; gap: 12px;
+  padding: 11px 14px;
+}
+.rend-fila:not(:last-child) {
+  box-shadow: inset 0 calc(var(--hairline) * -1) 0 var(--borde);
+}
+/* La primera es la que más paga y es la respuesta a la pregunta que trajo al
+   usuario a este panel: se marca sola, sin tener que leer la columna. */
+.rend-fila:first-child { background: var(--acento-suave); }
+
+.rend-quien { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rend-nombre { font-size: 14.5px; font-weight: 500; }
+.rend-tipo { font-size: 11.5px; color: var(--tenue-2); }
+.rend-tope { font-size: 11.5px; color: var(--tenue-2); }
+.rend-aviso-tope { font-size: 11.5px; color: #d8a24a; }
+
+.rend-tna {
+  display: flex; flex-direction: column; align-items: flex-end;
+  font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--acento-tinta);
+}
+.rend-tna-nota {
+  font-size: 10px; font-weight: 500; letter-spacing: .04em;
+  color: var(--tenue-2);
+}
+
+.rend-gana {
+  display: flex; flex-direction: column; align-items: flex-end;
+  min-width: 92px;
+  font-variant-numeric: tabular-nums;
+}
+.rend-gana-mes { font-size: 14.5px; font-weight: 600; color: var(--suba); }
+.rend-gana-anio { font-size: 11.5px; color: var(--tenue-2); }
+
+.rend-nota {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--borde);
+  line-height: 1.5;
+}
+
+/* En pantallas chicas las tres columnas no entran: la ganancia pasa abajo,
+   ocupando el ancho, en vez de comprimir los números hasta que se corten. */
+@media (max-width: 380px) {
+  .rend-fila { grid-template-columns: 1fr auto; }
+  .rend-gana {
+    grid-column: 1 / -1;
+    flex-direction: row; align-items: baseline; gap: 8px;
+    padding-top: 2px;
+  }
+}
+
 /* ------------------------------------------------------------------- Tabs */
 
 .tabs {

@@ -2,6 +2,7 @@
 
 import { enfocarLogin, montarLogin } from "./auth.js";
 import {
+  alCambiarSesion,
   borrarObjetivo as borrarEnLaBase,
   crearObjetivo,
   editarObjetivo,
@@ -11,10 +12,11 @@ import {
   traerMovimientos,
   traerObjetivos,
   traerPeriodo,
+  traerRendimientos,
   traerRetos,
 } from "./data.js";
 import { traerDolar } from "./dolar.js";
-import { borrar as borrarFoto, subir as subirFoto } from "./fotos.js";
+import { borrar as borrarFoto, olvidarFirmas, subir as subirFoto } from "./fotos.js";
 import {
   agregados as agregadosDelMes,
   generarYGuardar,
@@ -105,6 +107,38 @@ async function arrancar() {
 
   if (sesion) await abrirApp(sesion);
   else mostrarLogin();
+
+  // Se engancha DESPUÉS de resolver la sesión inicial: registrado antes, el
+  // aviso de arranque llegaría con el mismo usuario que acabamos de abrir y
+  // cargaríamos todo dos veces.
+  alCambiarSesion(sesionCambio);
+}
+
+/**
+ * Reacciona a un cambio de sesión venga de donde venga: de esta pestaña, de
+ * otra, o de supabase-js al no poder renovar el token.
+ *
+ * La comparación por id de usuario es la clave. Sin ella habría que elegir
+ * entre recargar en cada refresco de token —que pasa solo, cada tanto— o no
+ * reaccionar nunca; con ella, un refresco no hace nada y un cambio de cuenta
+ * recarga todo.
+ */
+function sesionCambio(sesion) {
+  const quien = sesion?.user?.id ?? null;
+
+  if (quien === null) {
+    // Puede llegar más de una vez (el logout propio ya pasó por acá). Es
+    // idempotente a propósito: volver al login dos veces no rompe nada.
+    if (usuarioEnPantalla !== null) volverAlLogin();
+    return;
+  }
+
+  // Mismo usuario: fue un refresco de token y no hay nada que hacer.
+  if (quien === usuarioEnPantalla) return;
+
+  // Otro usuario entró en otra pestaña. Lo que hay en pantalla es del anterior.
+  volverAlLogin();
+  abrirApp(sesion);
 }
 
 function mostrarLogin() {
@@ -112,7 +146,12 @@ function mostrarLogin() {
   enfocarLogin();
 }
 
+// Quién está cargado en pantalla ahora mismo (el uuid, no el email). Es lo que
+// distingue "se renovó el token" de "cambió la cuenta".
+let usuarioEnPantalla = null;
+
 async function abrirApp(sesion) {
+  usuarioEnPantalla = sesion?.user?.id ?? null;
   estado.email = sesion?.user?.email ?? "";
   mostrar("app");
   await cargarDatos();
@@ -121,7 +160,20 @@ async function abrirApp(sesion) {
 
 async function cerrarSesion() {
   await salir();
+  volverAlLogin();
+}
+
+/**
+ * Borra todo rastro del usuario que se va y muestra el login.
+ *
+ * Son tres cosas y las tres hacen falta: el estado en memoria, el caché de
+ * URLs firmadas de las fotos —que siguen funcionando sin sesión hasta que
+ * vencen— y el período elegido, que si no queda puesto para el que entre.
+ */
+function volverAlLogin() {
+  usuarioEnPantalla = null;
   reiniciarEstado();
+  olvidarFirmas();
   fijarPeriodo(mesActual());
   mostrarLogin();
 }
@@ -136,21 +188,26 @@ async function cargarDatos() {
     // Las dos consultas salen juntas: la comparación contra el período anterior
     // la necesita Gastos, y pedirla recién al entrar a esa pantalla dejaría un
     // hueco de carga cada vez que se toca la tab.
-    const [actuales, previos, ahorros, objetivos, gastos, narrativas, retos] = await Promise.all([
-      traerPeriodo(estado.periodo),
-      traerPeriodo(anterior(estado.periodo)),
-      // Sin acotar por fecha: la evolución del ahorro se lee sobre la historia
-      // entera, no sobre el mes elegido.
-      traerMovimientos({ tipo: "ahorro" }),
-      traerObjetivos(),
-      // Tampoco se acota: el termómetro compara el precio de un ítem entre
-      // meses distintos, y con el mes elegido no vería ninguna variación.
-      traerMovimientos({ tipo: "gasto" }),
-      // Las dos son de solo lectura y chicas; entran en la misma tanda para
-      // no agregar esperas al pintado inicial.
-      traerNarrativas().catch(() => []),
-      traerRetos().catch(() => []),
-    ]);
+    const [actuales, previos, ahorros, objetivos, gastos, narrativas, retos, rendimientos] =
+      await Promise.all([
+        traerPeriodo(estado.periodo),
+        traerPeriodo(anterior(estado.periodo)),
+        // Sin acotar por fecha: la evolución del ahorro se lee sobre la historia
+        // entera, no sobre el mes elegido.
+        traerMovimientos({ tipo: "ahorro" }),
+        traerObjetivos(),
+        // Tampoco se acota: el termómetro compara el precio de un ítem entre
+        // meses distintos, y con el mes elegido no vería ninguna variación.
+        traerMovimientos({ tipo: "gasto" }),
+        // Las tres son de solo lectura y chicas; entran en la misma tanda para
+        // no agregar esperas al pintado inicial.
+        traerNarrativas().catch(() => []),
+        traerRetos().catch(() => []),
+        // Treinta filas de tasas públicas, sin filtro por usuario. Va acá y no
+        // en un pedido diferido como el dólar porque sale de Supabase igual que
+        // el resto: es el mismo viaje, no un tercero que puede tardar.
+        traerRendimientos().catch(() => []),
+      ]);
 
     estado.movimientos = actuales;
     estado.movimientosPrevios = previos;
@@ -158,6 +215,7 @@ async function cargarDatos() {
     estado.historialGastos = gastos;
     estado.narrativas = narrativas;
     estado.retos = retos;
+    estado.rendimientos = rendimientos;
 
     // La serie del dólar no se espera: es de terceros y solo la usa una
     // sección. Cuando llega, se repinta. Si falla, el patrimonio se muestra

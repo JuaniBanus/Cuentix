@@ -22,6 +22,12 @@ const TIPOS = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 // Las URLs firmadas duran lo suficiente para mirar la pantalla un rato.
 const VIGENCIA_FIRMA = 60 * 60;
 
+// Ruta -> {url, vence}. Una URL firmada ANDA SIN SESIÓN: ese es el punto de
+// que esté firmada. O sea que lo que queda acá adentro sigue sirviendo para
+// bajar la imagen aunque el usuario cierre sesión, hasta que venza la hora.
+//
+// Por eso este caché se vacía en el logout (ver `olvidarFirmas`), y no alcanza
+// con que lo haga `reiniciarEstado`: esto no vive en el estado.
 const _cacheFirmas = new Map();
 
 /** Revisa el archivo antes de subirlo. Devuelve el problema, o null. */
@@ -89,6 +95,16 @@ export async function url(ruta) {
     vence: Date.now() + VIGENCIA_FIRMA * 1000,
   });
   return data.signedUrl;
+}
+
+/**
+ * Tira las URLs firmadas que haya en memoria. Se llama al cerrar sesión.
+ *
+ * No borra ninguna foto: solo deja de tener a mano links que todavía funcionan
+ * y que son del usuario que se acaba de ir.
+ */
+export function olvidarFirmas() {
+  _cacheFirmas.clear();
 }
 
 /** Borra la foto del bucket. Silencioso: si falla, queda un archivo huérfano. */

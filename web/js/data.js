@@ -94,6 +94,25 @@ export async function entrar(email, password) {
   return data.session;
 }
 
+/**
+ * Avisa cada vez que cambia la sesión, la haya cambiado esta pestaña o no.
+ *
+ * Hace falta porque la sesión de Supabase vive en el almacenamiento del
+ * navegador, que es COMPARTIDO entre pestañas: si alguien cierra sesión en una
+ * y entra con otra cuenta, esta pestaña se queda mostrando los datos del
+ * anterior en pantalla hasta que algo la obligue a repintar.
+ *
+ * También cubre el caso en que el token no se puede renovar: supabase-js
+ * cierra la sesión por su cuenta y ahí las consultas empiezan a volver vacías.
+ * Sin escuchar esto, la app mostraría todo en cero, que se lee como "perdiste
+ * los datos" y no como "se venció la sesión".
+ *
+ * @param {(sesion: object|null) => void} alCambiar recibe la sesión nueva, o null
+ */
+export function alCambiarSesion(alCambiar) {
+  sb.auth.onAuthStateChange((_evento, sesion) => alCambiar(sesion ?? null));
+}
+
 export async function salir() {
   // Cerrar sesión tiene que funcionar sin internet: el token se borra del
   // navegador igual, aunque no se pueda avisarle al servidor.
@@ -233,6 +252,37 @@ export async function traerRetos() {
     .limit(30);
   if (error) throw new Error(traducirErrorDeDatos(error));
   return data ?? [];
+}
+
+/**
+ * Las TNA de las billeteras virtuales, de mayor a menor.
+ *
+ * La única tabla sin dueño: son datos públicos, iguales para todos, y por eso
+ * la policy deja leerlas a cualquier usuario logueado en vez de filtrar por
+ * auth.uid(). Las escribe un cron del backend con service_role; la web solo lee.
+ *
+ * Devuelve [] ante cualquier error en vez de propagar, como `traerNarrativas`:
+ * es un panel accesorio de la pantalla de Ahorros y no puede dejarla sin pintar.
+ * Si la tabla todavía no existe (falta correr migrations/008), el panel muestra
+ * su propio mensaje de "todavía no hay tasas".
+ */
+export async function traerRendimientos() {
+  const { data, error } = await sb
+    .from("rendimientos_billeteras")
+    .select("nombre, tipo, tna, tope_monto, fecha_actualizacion, fondo")
+    .order("tna", { ascending: false })
+    .limit(60);
+  if (error) {
+    console.warn("No pude leer los rendimientos de billeteras:", error.message);
+    return [];
+  }
+  // numeric llega como string desde PostgREST: se normaliza acá una vez, igual
+  // que en traerInversiones, para que el panel no tenga que acordarse.
+  return (data ?? []).map((f) => ({
+    ...f,
+    tna: Number(f.tna),
+    tope_monto: f.tope_monto == null ? null : Number(f.tope_monto),
+  }));
 }
 
 export async function traerObjetivos() {

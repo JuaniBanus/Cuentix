@@ -8,6 +8,7 @@
 
 import { renderDolar } from "./dolar.js";
 import { renderPatrimonio } from "./patrimonio.js";
+import { renderRendimientos } from "./rendimientos.js";
 import { renderRetos } from "./retos.js";
 import { porMoneda, serieAcumulada, totalesPorCuenta, totalPorTipo } from "../cuentas.js";
 import { colorDeCategoria } from "../donut.js";
@@ -83,6 +84,14 @@ export function renderAhorros(contenedor, ctx) {
       casaAbierta: ctx.casaDolar,
       setCasa: ctx.setCasaDolar,
     });
+    // Va acá, entre el dólar y el patrimonio, siguiendo la misma lectura: en qué
+    // moneda conviene estar, dónde poner los pesos que quedan, y recién después
+    // cuánto se tiene en total.
+    //
+    // Como el dólar, no depende de los movimientos del usuario: se dibuja
+    // aunque no haya nada cargado, porque sirve desde el día uno.
+    renderRendimientos(contenedor, { rendimientos: ctx.rendimientos ?? [], hoy: ctx.hoy });
+
     if (historialAhorros?.length || ctx.inversiones?.length) {
       renderPatrimonio(contenedor, {
         ahorros: historialAhorros,
