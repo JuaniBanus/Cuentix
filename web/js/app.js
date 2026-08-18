@@ -4,6 +4,8 @@ import { enfocarLogin, montarLogin } from "./auth.js";
 import {
   alCambiarSesion,
   borrarObjetivo as borrarEnLaBase,
+  cambiarEstadoUsuario as cambiarEstadoEnLaBase,
+  cambiarPassword,
   crearObjetivo,
   editarObjetivo,
   salir,
@@ -11,10 +13,13 @@ import {
   traerInversiones,
   traerMovimientos,
   traerObjetivos,
+  traerPerfil,
   traerPeriodo,
   traerRendimientos,
   traerRetos,
+  traerUsuarios,
 } from "./data.js";
+import { enfocarPassword, montarPassword } from "./password.js";
 import { traerDolar } from "./dolar.js";
 import { borrar as borrarFoto, olvidarFirmas, subir as subirFoto } from "./fotos.js";
 import {
@@ -34,19 +39,43 @@ import { anterior, mesActual } from "./periodo.js";
 import { traerHistorico, traerPrecios } from "./mercado.js";
 import { traerPreciosCripto } from "./precios.js";
 import { registrarServiceWorker } from "./pwa.js";
-import { montarNavegacion, pintar } from "./router.js";
+import { armarBarra, montarNavegacion, pintar } from "./router.js";
 import { fijarPeriodo, montarSelectorPeriodo } from "./selectorPeriodo.js";
 import { seguirAlSistema } from "./tema.js";
 
 const vistas = {
   carga: document.querySelector("#vista-carga"),
   login: document.querySelector("#vista-login"),
+  password: document.querySelector("#vista-password"),
+  estado: document.querySelector("#vista-estado"),
   app: document.querySelector("#vista-app"),
 };
 
 /** Una sola vista visible a la vez: login y app nunca conviven en pantalla. */
 function mostrar(cual) {
   for (const [nombre, nodo] of Object.entries(vistas)) nodo.hidden = nombre !== cual;
+}
+
+/**
+ * Muestra o esconde el período, el dólar y el ojo.
+ *
+ * Con `?.` a propósito. Ese grupo de botones se MUDA entre el encabezado y la
+ * barra según el ancho, así que no siempre está donde uno lo dejó, y hubo un
+ * momento en que directamente desaparecía del documento. Un control de
+ * presentación no puede tirar abajo la función que lo llama: cerrar sesión
+ * pasa por acá, y dejar a alguien adentro por no encontrar un botón es mucho
+ * peor que mostrarle un botón de más.
+ */
+function mostrarControles(visible) {
+  const controles = document.querySelector(".cabecera-acciones");
+  if (controles) controles.hidden = !visible;
+}
+
+/** La vista de cuenta sin acceso, con el motivo escrito. */
+function mostrarEstado(titulo, detalle) {
+  document.querySelector("#estado-titulo").textContent = titulo;
+  document.querySelector("#estado-detalle").textContent = detalle;
+  mostrar("estado");
 }
 
 const contenido = document.querySelector("#contenido");
@@ -81,6 +110,8 @@ async function arrancar() {
       analizarGastos,
       generarNarrativa,
       verNarrativaDe,
+      cambiarEstadoUsuario,
+      recargarUsuarios: cargarUsuarios,
       setCasaDolar: (casa) => {
         estado.casaDolar = casa;
         pintar();
@@ -96,6 +127,8 @@ async function arrancar() {
     },
   });
   montarLogin(abrirApp);
+  montarPassword(guardarPassword);
+  document.querySelector("#btn-salir-estado").addEventListener("click", cerrarSesion);
 
   let sesion = null;
   try {
@@ -150,13 +183,92 @@ function mostrarLogin() {
 // distingue "se renovó el token" de "cambió la cuenta".
 let usuarioEnPantalla = null;
 
+/**
+ * Decide QUÉ app se dibuja, y recién después la dibuja.
+ *
+ * El perfil se lee antes que cualquier dato, y el orden de las ramas no es
+ * casual:
+ *
+ *   1. sin perfil  -> no se sabe nada de la cuenta; no se pide nada.
+ *   2. contraseña provisoria -> se cambia antes de ver un solo número. Si el
+ *      dashboard se dibujara primero, la provisoria ya habría servido para ver
+ *      los datos y el pedido de cambio sería una sugerencia.
+ *   3. cuenta no activa -> se dice el motivo. Un dashboard en cero se lee como
+ *      "perdí mis datos", que es lo contrario de lo que pasó.
+ *   4. superusuario -> administración, y nada de finanzas.
+ *   5. resto -> el dashboard de siempre.
+ *
+ * Las ramas 1 a 3 salen SIN pedir movimientos. No es una optimización: es que
+ * una cuenta pausada no tiene por qué generar consultas a nombre suyo.
+ */
 async function abrirApp(sesion) {
   usuarioEnPantalla = sesion?.user?.id ?? null;
   estado.email = sesion?.user?.email ?? "";
+
+  let perfil = null;
+  try {
+    perfil = await traerPerfil(sesion.user.id);
+  } catch (problema) {
+    // Sin perfil no se puede decidir nada, así que tampoco se sigue de largo.
+    mostrarEstado("No pude leer tu cuenta", problema.message);
+    return;
+  }
+
+  estado.perfil = perfil;
+
+  if (!perfil) {
+    mostrarEstado(
+      "Tu cuenta no está configurada",
+      "Existe el usuario pero le falta el perfil. Avisale al administrador."
+    );
+    return;
+  }
+
+  if (perfil.debe_cambiar_password) {
+    mostrar("password");
+    enfocarPassword();
+    return;
+  }
+
+  if (perfil.estado !== "activo") {
+    mostrarEstado(...(MOTIVO[perfil.estado] ?? MOTIVO.pendiente));
+    return;
+  }
+
+  // Un superusuario administra cuentas: no tiene finanzas ni pantallas para
+  // mostrarlas. El período, el dólar y el ojo valen para toda la app y se
+  // esconden con ella: sin movimientos no significan nada.
+  const esAdmin = perfil.rol === "superusuario";
+
+  // La barra primero: al armarla, los controles vuelven al encabezado y desde
+  // ahí se reubican. Esconderlos antes se perdería en esa mudanza.
+  armarBarra(perfil.rol);
+  mostrarControles(!esAdmin);
   mostrar("app");
+
+  if (esAdmin) {
+    await cargarUsuarios();
+    return;
+  }
+
   await cargarDatos();
   cargarCotizacion(); // sin await: llega cuando llega
 }
+
+// Qué se le dice a cada estado que no habilita. Se distinguen porque la salida
+// es distinta: una pausada se destraba avisando, una pendiente es una cuenta
+// que nunca terminó de darse de alta.
+const MOTIVO = {
+  pausado: [
+    "Tu cuenta está pausada",
+    "No podés entrar por ahora. Tus datos están intactos: cuando el " +
+      "administrador la reactive, vuelve todo como estaba.",
+  ],
+  pendiente: [
+    "Tu cuenta todavía no está habilitada",
+    "Ya existe, pero falta que el administrador la active. Escribile y listo.",
+  ],
+};
 
 async function cerrarSesion() {
   await salir();
@@ -175,7 +287,69 @@ function volverAlLogin() {
   reiniciarEstado();
   olvidarFirmas();
   fijarPeriodo(mesActual());
+  // Los controles se esconden para el superusuario; si el próximo que entra es
+  // un usuario común, tienen que estar de vuelta.
+  mostrarControles(true);
   mostrarLogin();
+}
+
+
+// --------------------------------------------------------------------------
+// Administración
+// --------------------------------------------------------------------------
+//
+// Que estas funciones existan en el bundle no le da acceso a nadie: quien las
+// llame sin ser superusuario recibe su propio perfil y nada más (RLS), y
+// `admin_cambiar_estado` le contesta que no tiene permiso. La pantalla se
+// esconde porque no tiene sentido mostrarla, no porque sea lo que protege.
+
+async function cargarUsuarios() {
+  try {
+    estado.usuarios = await traerUsuarios();
+    estado.errorAdmin = null;
+  } catch (problema) {
+    estado.errorAdmin = problema.message;
+  }
+  pintar();
+}
+
+async function cambiarEstadoUsuario(userId, nuevoEstado) {
+  estado.guardandoUsuario = userId;
+  estado.errorAdmin = null;
+  pintar();
+
+  try {
+    await cambiarEstadoEnLaBase(userId, nuevoEstado);
+    // Se relee en vez de parchear la fila en memoria: así se ve lo que quedó
+    // guardado de verdad y no lo que creíamos que iba a quedar.
+    estado.usuarios = await traerUsuarios();
+  } catch (problema) {
+    estado.errorAdmin = problema.message;
+  } finally {
+    estado.guardandoUsuario = null;
+    pintar();
+  }
+}
+
+
+// --------------------------------------------------------------------------
+// Cambio obligatorio de contraseña
+// --------------------------------------------------------------------------
+
+/**
+ * Guarda la contraseña nueva y sigue al lugar que corresponda.
+ *
+ * Se rearma la sesión desde cero llamando a `abrirApp`: el perfil cambió (el
+ * flag bajó) y todo lo que se decide con él —qué barra, qué pantallas— hay que
+ * volver a decidirlo. Parchear el flag en memoria y seguir dejaría el estado
+ * diciendo una cosa y la base otra.
+ */
+async function guardarPassword(nueva) {
+  await cambiarPassword(nueva, estado.perfil.user_id);
+
+  const sesion = await sesionActual();
+  if (sesion) await abrirApp(sesion);
+  else mostrarLogin();
 }
 
 // --------------------------------------------------------------------------

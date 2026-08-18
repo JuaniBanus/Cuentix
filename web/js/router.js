@@ -9,6 +9,7 @@ import { marcarActiva, montarBarra } from "./barraSecciones.js";
 import { renderAviso } from "./aviso.js";
 import { estado } from "./estado.js";
 import { cotizacionActual } from "./format.js";
+import { renderAdmin } from "./screens/admin.js";
 import { renderAhorros } from "./screens/ahorros.js";
 import { renderGastos } from "./screens/gastos.js";
 import { renderInicio } from "./screens/inicio.js";
@@ -18,18 +19,42 @@ import { renderUsuario } from "./screens/usuario.js";
 // `datos: true` marca las que no tienen nada que mostrar si la consulta falló.
 // Usuario no lleva la marca a propósito: sin internet igual se tiene que poder
 // cambiar el tema y cerrar sesión.
+//
+// `roles` dice quién ve cada sección. Un superusuario administra cuentas y no
+// tiene finanzas —ni propias—, así que las cuatro secciones de plata no son
+// suyas; un usuario común nunca ve administración.
+//
+// Esto es lo que se DIBUJA, y no hay que confundirlo con lo que se PUEDE. Que
+// una sección no esté en la barra no impide pedirle los datos a Supabase con un
+// curl: lo que lo impide son las policies restrictivas de migrations/014. Acá
+// se decide qué app tiene sentido mostrar; allá, qué se puede leer.
 export const TABS = [
-  { id: "inicio", nombre: "Inicio", icono: "i-casa", render: renderInicio, datos: true },
-  { id: "gastos", nombre: "Gastos", icono: "i-gastos", render: renderGastos, datos: true },
-  { id: "ahorros", nombre: "Ahorros", icono: "i-ahorro", render: renderAhorros, datos: true },
+  { id: "inicio", nombre: "Inicio", icono: "i-casa", render: renderInicio, datos: true,
+    roles: ["usuario"] },
+  { id: "gastos", nombre: "Gastos", icono: "i-gastos", render: renderGastos, datos: true,
+    roles: ["usuario"] },
+  { id: "ahorros", nombre: "Ahorros", icono: "i-ahorro", render: renderAhorros, datos: true,
+    roles: ["usuario"] },
   // Sin `datos`: la cartera tiene su propia consulta y no sale de los
   // movimientos del período, así que un fallo de esos no la deja sin mostrar.
-  { id: "inversiones", nombre: "Inversiones", icono: "i-inversion", render: renderInversiones },
+  { id: "inversiones", nombre: "Inversiones", icono: "i-inversion", render: renderInversiones,
+    roles: ["usuario"] },
+  // La única del superusuario. Sin `datos` porque su error se muestra adentro
+  // de la pantalla, con el botón de reintentar al lado de la lista.
+  { id: "admin", nombre: "Usuarios", icono: "i-usuario", render: renderAdmin,
+    roles: ["superusuario"] },
   // `aparte` la saca de la fila del medio y la manda al extremo derecho de la
   // barra, junto al ojo, reducida al ícono. No es una vista de datos como las
-  // otras cuatro: es la cuenta.
-  { id: "usuario", nombre: "Usuario", icono: "i-usuario", render: renderUsuario, aparte: true },
+  // otras cuatro: es la cuenta. La ven los dos roles: cerrar sesión y cambiar
+  // el tema no dependen de qué tipo de cuenta tengas.
+  { id: "usuario", nombre: "Usuario", icono: "i-usuario", render: renderUsuario, aparte: true,
+    roles: ["usuario", "superusuario"] },
 ];
+
+/** Las secciones que le corresponden a un rol. Sin rol conocido, ninguna. */
+export function tabsVisibles(rol) {
+  return TABS.filter((t) => t.roles.includes(rol));
+}
 
 let nav;
 let contenido;
@@ -38,7 +63,25 @@ let acciones = {};
 /** @param {{nav: HTMLElement, contenido: HTMLElement, acciones: object}} opciones */
 export function montarNavegacion(opciones) {
   ({ nav, contenido, acciones } = opciones);
-  montarBarra(nav, TABS, irA);
+  // La barra NO se dibuja acá: todavía no se sabe el rol, y con la lista
+  // completa se vería un instante la barra de finanzas antes de cambiarla por
+  // la de administración. La dibuja `armarBarra`, ya con el perfil leído.
+}
+
+/**
+ * Dibuja la barra con las secciones del rol y deja el tab activo en una válida.
+ *
+ * Se llama al entrar, cuando ya se sabe quién es. El reacomodo del tab importa:
+ * `estado.tab` arranca en "inicio", que para un superusuario no existe, y sin
+ * esto quedaría con una sección activa que no está en su barra.
+ */
+export function armarBarra(rol) {
+  const visibles = tabsVisibles(rol);
+  montarBarra(nav, visibles, irA);
+
+  if (!visibles.some((t) => t.id === estado.tab)) {
+    estado.tab = visibles[0]?.id ?? "usuario";
+  }
 }
 
 export function irA(tab) {
@@ -71,7 +114,13 @@ export function irA(tab) {
 export function pintar(conEntrada = false) {
   marcarActiva(nav, estado.tab);
 
-  const actual = TABS.find((t) => t.id === estado.tab) ?? TABS[0];
+  // Se busca SOLO entre las del rol, y el respaldo también sale de esa lista.
+  // Con `TABS[0]` de respaldo, un superusuario cuyo tab quedara en un id
+  // desconocido caería en Inicio y la pantalla intentaría dibujar movimientos
+  // que la base no le va a dar nunca.
+  const visibles = tabsVisibles(estado.perfil?.rol);
+  const actual = visibles.find((t) => t.id === estado.tab) ?? visibles[0];
+  if (!actual) return;
 
   // Marca de qué pantalla se está mostrando. No la usa el JS: es el gancho del
   // que cuelgan los reacomodos de dos columnas en pantalla grande, que si no no
@@ -162,6 +211,14 @@ export function pintar(conEntrada = false) {
     analizarGastos: acciones.analizarGastos,
     categoriaAbierta: estado.categoriaAbierta,
     email: estado.email,
+    perfil: estado.perfil,
+    // Administración. Las pantallas de finanzas los ignoran; el panel es el
+    // único que los usa.
+    usuarios: estado.usuarios,
+    errorAdmin: estado.errorAdmin,
+    guardandoUsuario: estado.guardandoUsuario,
+    cambiarEstadoUsuario: acciones.cambiarEstadoUsuario,
+    recargarUsuarios: acciones.recargarUsuarios,
     setMoneda: (m) => {
       estado.moneda = m;
       // Cambiar de moneda cierra el detalle: la categoría abierta podría no

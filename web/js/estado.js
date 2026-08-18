@@ -102,6 +102,23 @@ function estadoInicial() {
     // cada toque del ojo la redibuja entera, y una variable local se perdería.
     categoriaAbierta: null,
     email: "",
+
+    // El perfil de quien entró: {user_id, email, estado, rol,
+    // debe_cambiar_password}. null = todavía no se leyó, o no tiene.
+    //
+    // De acá sale QUÉ APP se dibuja. Es lo primero que se pide al entrar,
+    // antes que cualquier dato: sin saber el rol no se sabe ni qué secciones
+    // mostrar, y pedir movimientos "por las dudas" sería pedirle finanzas a la
+    // base en nombre de alguien que capaz no tiene ninguna.
+    perfil: null,
+
+    // Panel de administración. Solo se llenan cuando el rol es superusuario;
+    // para un usuario común quedan así toda la sesión.
+    usuarios: [],
+    errorAdmin: null,
+    // user_id de la cuenta cuyo estado se está cambiando, para poder
+    // deshabilitar ESE botón y no todos.
+    guardandoUsuario: null,
     // Si los datos no se pudieron traer, acá queda el ErrorAmable. Las pantallas
     // que dependen de datos muestran el aviso en vez de dibujar un mes vacío,
     // que sería mentir: "sin movimientos" y "no pude leer" no son lo mismo.

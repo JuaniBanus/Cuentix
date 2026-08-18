@@ -2291,3 +2291,89 @@ button { font: inherit; color: inherit; cursor: pointer; }
     animation: none !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Panel de administración
+   --------------------------------------------------------------------------
+   La única pantalla de datos del superusuario. Es una lista para operar, no
+   para leer: lo que tiene que resaltar es el ESTADO de cada cuenta y el botón
+   que lo cambia, no el email.
+
+   El chip va con clase propia y no con `.chip`, que en esta hoja ya es el
+   filtro clickeable de Gastos. Dos componentes distintos con el mismo nombre
+   terminan peleándose el padding y el color en la cascada. */
+
+.lista-usuarios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.usuario-fila {
+  display: grid;
+  /* El email se estira, el chip y el botón ocupan lo suyo. Con tres columnas
+     automáticas, un email largo empujaría el botón fuera de la tarjeta. */
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--borde);
+}
+
+.usuario-fila:last-child { border-bottom: none; }
+
+.usuario-datos {
+  display: grid;
+  gap: 2px;
+  min-width: 0;   /* sin esto, un email largo no deja achicar la columna */
+}
+
+.usuario-email {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.estado-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+/* El color no es lo único que distingue los tres estados: el texto del chip ya
+   los nombra. Así siguen siendo legibles para quien no separa verde de rojo. */
+.estado-chip.es-activo    { color: var(--suba);  background: color-mix(in srgb, var(--suba) 14%, transparent); }
+.estado-chip.es-pausado   { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
+.estado-chip.es-pendiente { color: var(--tenue); background: var(--realce); border-color: var(--borde); }
+
+.boton-chico {
+  width: auto;
+  padding: 7px 14px;
+  font-size: 13px;
+}
+
+.pasos-alta {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  color: var(--tenue);
+  font-size: 14px;
+}
+
+.pasos-alta b { color: var(--texto); font-weight: 600; }
+
+@media (max-width: 30rem) {
+  /* En un teléfono las tres columnas no entran: el chip y el botón bajan a una
+     segunda fila, alineados a la derecha. */
+  .usuario-fila {
+    grid-template-columns: 1fr auto;
+  }
+  .usuario-datos { grid-column: 1 / -1; }
+}

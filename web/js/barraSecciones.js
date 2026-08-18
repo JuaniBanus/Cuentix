@@ -24,6 +24,18 @@ const PANTALLA_GRANDE = "(min-width: 768px)";
  * @param {(id: string) => void} alTocar
  */
 export function montarBarra(nav, secciones, alTocar) {
+  // Los controles del encabezado VIVEN ADENTRO de esta barra en pantalla
+  // grande (ver `mudarControles`), así que el innerHTML de más abajo se los
+  // llevaría puestos. Se los devuelve al encabezado antes de arrasar, y
+  // `mudarControles` los reubica al final.
+  //
+  // Hace falta porque la barra se redibuja: al entrar se arma con las secciones
+  // del rol, y eso pasa en cada login. La primera versión de esto asumía un
+  // solo armado en toda la vida de la página; con dos, el nodo desaparecía del
+  // documento y todo lo que lo buscaba después reventaba con null —incluido el
+  // botón de cerrar sesión, que dejaba de sacar a nadie—.
+  rescatarControles(nav);
+
   // Las secciones van en dos grupos, y la división la trae cada sección en
   // `aparte`. Las normales se centran en la barra; las apartadas se van al
   // extremo derecho, junto a los controles.
@@ -63,9 +75,23 @@ export function montarBarra(nav, secciones, alTocar) {
   // Al cambiar el ancho la barra pasa de horizontal a vertical y las medidas que
   // tenía la pastilla dejan de valer. Se vuelve a medir la que esté activa, sin
   // repintar la pantalla: esto es geometría, no datos.
-  window.addEventListener("resize", () => {
-    moverPastilla(nav, nav.querySelector(".tab.es-activo"));
-  });
+  //
+  // Se engancha UNA sola vez aunque la barra se rearme muchas: si no, cada
+  // login sumaría otro oyente sobre el mismo evento y a la décima vez un
+  // simple achicar la ventana dispararía diez mediciones.
+  if (!oyenteDeAncho) {
+    oyenteDeAncho = () => moverPastilla(nav, nav.querySelector(".tab.es-activo"));
+    window.addEventListener("resize", oyenteDeAncho);
+  }
+}
+
+let oyenteDeAncho = null;
+
+/** Devuelve los controles al encabezado si estaban dentro de la barra. */
+function rescatarControles(nav) {
+  const controles = nav.querySelector(".cabecera-acciones");
+  const cabecera = document.querySelector(".cabecera");
+  if (controles && cabecera) cabecera.append(controles);
 }
 
 /** Marca qué sección se está viendo y lleva la pastilla hasta ella. */
@@ -126,15 +152,21 @@ function moverPastilla(nav, activo) {
 // busca por id se quedaría con el primero del documento, que no siempre es el
 // que está a la vista. Mudándolo hay uno solo y siempre es el visible.
 
-function mudarControles(nav) {
-  const controles = document.querySelector(".cabecera-acciones");
-  const cabecera = document.querySelector(".cabecera");
-  const fin = nav.querySelector(".tabs-fin");
-  if (!controles || !cabecera || !fin) return;
+let oyenteDeUmbral = false;
 
+function mudarControles(nav) {
   const grande = window.matchMedia(PANTALLA_GRANDE);
 
   const ubicar = () => {
+    // Los tres nodos se buscan ACÁ ADENTRO y no se capturan al enganchar. La
+    // barra se rearma en cada login, así que un `.tabs-fin` guardado en la
+    // clausura apuntaría a un nodo que ya salió del documento, y los controles
+    // se mudarían a la nada.
+    const controles = document.querySelector(".cabecera-acciones");
+    const cabecera = document.querySelector(".cabecera");
+    const fin = nav.querySelector(".tabs-fin");
+    if (!controles || !cabecera || !fin) return;
+
     // append y prepend MUEVEN el nodo, no lo copian: se desprende solo de donde
     // estaba y se lleva puestos los eventos ya enganchados. Por eso no hay que
     // volver a conectar nada cada vez que se cruza el umbral.
@@ -146,6 +178,10 @@ function mudarControles(nav) {
     else cabecera.append(controles);
   };
 
-  grande.addEventListener("change", ubicar);
+  // Una sola vez, por lo mismo que el de resize.
+  if (!oyenteDeUmbral) {
+    grande.addEventListener("change", ubicar);
+    oyenteDeUmbral = true;
+  }
   ubicar();
 }
