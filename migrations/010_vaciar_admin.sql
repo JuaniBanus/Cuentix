@@ -1,3 +1,18 @@
+-- #########################################################################
+-- ##  NO CORRAS ESTE ARCHIVO. QUEDO OBSOLETO.                            ##
+-- ##                                                                     ##
+-- ##  Este script BORRA los datos del administrador. Se escribio cuando   ##
+-- ##  parecian de prueba, y no lo eran: son 31 movimientos reales de la   ##
+-- ##  cuenta personal (juanbanuss@gmail.com) que la 009 le asigno al      ##
+-- ##  admin.                                                             ##
+-- ##                                                                     ##
+-- ##  Lo que hay que correr es migrations/013_reasignar_datos_al_dueno.sql ##
+-- ##  que los CAMBIA DE DUENO en vez de borrarlos.                        ##
+-- ##                                                                     ##
+-- ##  Se conserva solo como registro de lo que se penso en su momento.    ##
+-- #########################################################################
+
+
 -- Dejar la cuenta de administración sin datos financieros.
 --
 -- Correr en: Supabase -> SQL Editor -> New query -> Run.
