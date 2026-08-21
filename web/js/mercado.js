@@ -25,6 +25,7 @@
 // un precio de ayer presentado como el de hoy es un error.
 
 import { BACKEND_URL } from "./config.js";
+import { sesionActual } from "./data.js";
 
 const CLAVE_CACHE = "cuentix:precios-mercado";
 
@@ -84,7 +85,18 @@ export function ultimoConocido(ticker, mercado) {
 async function pedir(ruta) {
   if (!BACKEND_URL) throw new Error("Falta configurar BACKEND_URL en config.js.");
 
+  // El proxy pide sesión desde que se cerró el agujero de cuota: sin token,
+  // cualquiera con la URL podía quemar las 700 llamadas diarias del proveedor
+  // y dejar esta pantalla con precios viejos sin explicación.
+  const sesion = await sesionActual();
+  if (!sesion?.access_token) {
+    const error = new Error("Tu sesión venció. Entrá de nuevo para ver precios.");
+    error.sinSesion = true;
+    throw error;
+  }
+
   const respuesta = await fetch(`${BACKEND_URL}${ruta}`, {
+    headers: { Authorization: `Bearer ${sesion.access_token}` },
     signal: AbortSignal.timeout(ESPERA_MS),
   });
 
@@ -96,6 +108,14 @@ async function pedir(ruta) {
     // de configuración y afecta a todos.
     error.sinCobertura = respuesta.status === 400 || respuesta.status === 502;
     error.sinConfigurar = respuesta.status === 503;
+    error.sinSesion = respuesta.status === 401;
+    // 429 es cupo, no falta de cobertura: reintentar en unos segundos anda.
+    // Marcarlo aparte evita que la pantalla diga "no cubierto" sobre un activo
+    // que sí lo está.
+    if (respuesta.status === 429) {
+      error.demasiadosPedidos = true;
+      error.esperaSegundos = Number(respuesta.headers.get("retry-after")) || 60;
+    }
     throw error;
   }
 
@@ -139,11 +159,15 @@ export async function traerPrecios(inversiones) {
         sinCobertura.push(ticker);
       }
     } catch (problema) {
-      if (problema.sinConfigurar) {
-        // Es de configuración, no del activo: se corta y se dice una sola vez.
+      // Tres motivos distintos para cortar en seco en vez de seguir con el
+      // resto: falta la clave en el servidor, venció la sesión, o se agotó el
+      // cupo por minuto. Ninguno mejora pidiendo el activo siguiente, y con el
+      // cupo insistir es lo peor que se puede hacer.
+      if (problema.sinConfigurar || problema.sinSesion || problema.demasiadosPedidos) {
         error = problema.message;
         break;
       }
+      // Esto sí es del activo: los demás pueden andar.
       if (problema.sinCobertura) sinCobertura.push(ticker);
       else {
         error = problema.message;

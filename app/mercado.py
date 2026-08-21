@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -62,6 +63,23 @@ TIEMPO_LIMITE = 10.0
 # Los papeles argentinos no están en Twelve Data; salen de Data912, que además
 # devuelve la rueda entera en un solo pedido y por eso se cachea como un bloque.
 LISTAS_ARG = ("arg_stocks", "arg_cedears", "arg_bonds")
+
+# Qué puede tener un ticker. Letras, números, punto y guion cubren todo lo real
+# —BRK.B, RTY-USD, GGAL— y nada más.
+#
+# No alcanzaba con el largo. En _historico_argentino el ticker se pega dentro de
+# una RUTA (/historical/{tipo}/{ticker}), así que un "../" ahí no consulta un
+# activo: cambia a qué recurso de data912.com se le pega el pedido. Validar el
+# alfabeto corta esa clase entera de problema en el único lugar donde entra.
+TICKER_VALIDO = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,19}$")
+
+# Cuántas entradas se guardan antes de tirar las más viejas.
+#
+# Sin tope, cada combinación de ticker y cantidad de días agrega una entrada que
+# no se borra nunca: `hist:us:AAPL:90` y `hist:us:AAPL:91` son dos. En los 512 MB
+# de Render eso es una fuga lenta, y quien la alimenta es cualquiera que llame al
+# endpoint. El caché existe para ahorrar cuota, no para ser un archivo histórico.
+TOPE_CACHE = 500
 
 
 class MercadoError(RuntimeError):
@@ -140,7 +158,39 @@ def _guardado(clave: str) -> tuple[Any, bool] | None:
 
 
 def _guardar(clave: str, dato: Any) -> None:
+    # Reinsertar mueve la clave al final, así el orden del dict queda por uso
+    # más reciente y descartar los primeros descarta lo más viejo.
+    _cache.pop(clave, None)
     _cache[clave] = (dato, time.monotonic())
+
+    if len(_cache) > TOPE_CACHE:
+        for vieja in list(_cache)[: len(_cache) - TOPE_CACHE]:
+            del _cache[vieja]
+
+
+def _limpiar_ticker(ticker: str) -> str:
+    """Normaliza y valida un ticker, o explica por qué no sirve.
+
+    Raises:
+        ValorInvalido: si está vacío, es muy largo o trae caracteres que ningún
+            ticker real tiene.
+    """
+    limpio = (ticker or "").strip().upper()
+    if not limpio:
+        raise ValorInvalido("Falta el ticker.")
+    if not TICKER_VALIDO.match(limpio):
+        raise ValorInvalido(
+            "Ticker inválido: se admiten letras, números, punto y guion "
+            "(hasta 20 caracteres)."
+        )
+    return limpio
+
+
+def _limpiar_mercado(mercado: str | None) -> str:
+    elegido = (mercado or "us").strip().lower()
+    if elegido not in ("us", "ar"):
+        raise ValorInvalido("El mercado tiene que ser «us» o «ar».")
+    return elegido
 
 
 # --------------------------------------------------------------------------
@@ -318,13 +368,8 @@ async def precio(ticker: str, mercado: str = "us") -> dict:
     - "us": Twelve Data. Gasta cuota.
     - "ar": Data912, mercado argentino. No gasta cuota ni pide clave.
     """
-    ticker = ticker.strip().upper()
-    if not ticker or len(ticker) > 20:
-        raise ValorInvalido("Ticker inválido.")
-
-    mercado = (mercado or "us").strip().lower()
-    if mercado not in ("us", "ar"):
-        raise ValorInvalido("El mercado tiene que ser «us» o «ar».")
+    ticker = _limpiar_ticker(ticker)
+    mercado = _limpiar_mercado(mercado)
 
     clave = f"precio:{mercado}:{ticker}"
     guardado = _guardado(clave)
@@ -362,15 +407,15 @@ async def historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
     por activo: pegarlos a cada consulta de precio engordaría la respuesta que
     más se pide para servir a la pantalla que menos se abre.
     """
-    ticker = ticker.strip().upper()
-    if not ticker or len(ticker) > 20:
-        raise ValorInvalido("Ticker inválido.")
+    ticker = _limpiar_ticker(ticker)
+    mercado = _limpiar_mercado(mercado)
 
-    mercado = (mercado or "us").strip().lower()
-    if mercado not in ("us", "ar"):
-        raise ValorInvalido("El mercado tiene que ser «us» o «ar».")
-
-    dias = max(7, min(int(dias or 90), 365))
+    # El int() puede reventar con basura ("dias=abc"): se traduce a un 400, que
+    # es de quien llama, en vez de dejar salir un 500 que parece culpa nuestra.
+    try:
+        dias = max(7, min(int(dias or 90), 365))
+    except (TypeError, ValueError) as exc:
+        raise ValorInvalido("«dias» tiene que ser un número entero.") from exc
 
     clave = f"hist:{mercado}:{ticker}:{dias}"
     guardado = _guardado(clave)
