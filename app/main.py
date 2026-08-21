@@ -26,6 +26,7 @@ from app.cuotas import pedir_faltantes as pedir_faltantes_cuotas
 from app.cuotas import redactar as redactar_cuotas
 from app.tasas import obtener as obtener_tasas
 from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
+from app.limites import Limite, LimiteExcedido, identificar
 from app.alertas import revisar as revisar_alertas_de_precio
 from app.insights import AgregadosGastos, InsightsError
 from app.insights import generar as generar_insights
@@ -150,8 +151,90 @@ MSG_SIN_ACCESO = (
 ESPERA_SIN_ACCESO = 30 * 60.0
 _ultimo_aviso: dict[int, float] = {}
 
+# Cuántos chats desconocidos se recuerdan para no repetirles el aviso.
+#
+# Sin tope, cada chat que escribe una vez deja una entrada para siempre. No es
+# explotable barato —hacen falta cuentas de Telegram distintas—, pero es una
+# fuga de memoria real en un proceso que vive semanas. Cuando se llena se limpia
+# lo vencido, y si aun así sobra, lo más viejo: el castigo de olvidar a alguien
+# es que reciba el aviso una vez más.
+TOPE_AVISOS = 2_000
+
+# Que la ruta vieja del webhook ya avisó. Una vez por arranque alcanza.
+_aviso_webhook_viejo = False
+
 # Cuántas categorías mostrar en el desglose antes de agrupar el resto.
 TOPE_CATEGORIAS = 8
+
+# --------------------------------------------------------------------------
+# Cupos por cliente
+# --------------------------------------------------------------------------
+#
+# Los dos frenan gasto, no acceso, y por eso se cuentan distinto.
+#
+# El de mercado va por IP: son datos públicos y lo que se protege es el cupo
+# diario del proveedor, que es de todos. 30 por minuto deja pasar de sobra una
+# pantalla de inversiones —que además pide en serie y contra el caché— y corta
+# a quien quiera quemar las 700 llamadas del día.
+#
+# El de Gemini va por USUARIO y no por IP: acá ya hay sesión, así que se puede
+# contar a la persona en vez de a la conexión. Una IP compartida no debería
+# hacer que dos usuarios se roben el cupo entre sí.
+LIMITE_MERCADO = Limite(30, 60.0, "mercado")
+LIMITE_GEMINI = Limite(20, 3600.0, "gemini")
+
+
+def _frenar(limite: Limite, clave: str) -> None:
+    """Aplica un cupo y traduce el exceso a un 429 con Retry-After.
+
+    El 429 con la cabecera es lo que un cliente educado sabe leer para esperar
+    en vez de reintentar en bucle, que es lo que convierte un pico en un
+    problema sostenido.
+    """
+    try:
+        limite.revisar(clave)
+    except LimiteExcedido as exc:
+        logger.warning("Cupo de %s agotado por %s", limite.nombre, clave)
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            str(exc),
+            headers={"Retry-After": str(exc.espera)},
+        ) from exc
+
+
+async def _exigir_sesion(authorization: str | None) -> str:
+    """El id del usuario dueño del token, o un 401 con el motivo."""
+    try:
+        return await verificar_sesion(authorization)
+    except SesionInvalida as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+
+def _autorizar_tarea(authorization: str | None) -> None:
+    """Comprueba el secreto de los cron, que viaja en la cabecera.
+
+    ANTES iba en la URL (/tareas/alertas/<secreto>). Se movió acá porque la
+    ruta completa queda escrita en el log de accesos de Render en cada corrida
+    —una por hora—, y un secreto en un log deja de ser un secreto: lo ve
+    cualquiera con acceso a los logs, y sobrevive a cualquier rotación que no
+    incluya purgarlos.
+
+    Una cabecera Authorization no se registra en el log de accesos.
+    """
+    if not ALERTAS_SECRET:
+        logger.warning("Disparo de tarea con ALERTAS_SECRET sin configurar")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+
+    entregado = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        entregado = authorization[7:].strip()
+
+    # compare_digest incluso cuando falta el token: comparar contra "" también
+    # tiene que tardar lo mismo que comparar contra un secreto equivocado.
+    if not secrets.compare_digest(entregado, ALERTAS_SECRET):
+        # 404 y no 403, igual que el webhook: no se confirma que la ruta exista.
+        logger.warning("Disparo de tarea con secreto inválido")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
 
 
 @asynccontextmanager
@@ -190,7 +273,12 @@ if ORIGENES_WEB:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(ORIGENES_WEB),
-        allow_methods=["POST", "OPTIONS"],
+        # GET hace falta desde que /api/precio pide sesión. Un GET sin cabeceras
+        # propias es "simple" y el navegador lo manda sin preguntar, pero al
+        # sumarle Authorization pasa a llevar preflight, y ahí sí se compara
+        # contra esta lista. Sin GET acá, la pantalla de inversiones dejaría de
+        # cargar precios con un error de CORS que no menciona a la cabecera.
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
 else:
@@ -217,19 +305,36 @@ async def salud() -> dict[str, str]:
 # arrancar un proceso nuevo, el caché no sobreviviría y haría falta un KV
 # aparte —otra cuenta, otro secreto, otra pieza que puede fallar—.
 #
-# Estos dos endpoints NO piden sesión, al revés que /insights. Devuelven
-# cotizaciones públicas, iguales para todos, sin nada del usuario. Lo que se
-# protege es la clave, y para eso alcanza con que no salga del servidor.
+# Estos endpoints PIDEN SESIÓN, igual que /insights, aunque los datos que
+# devuelven sean públicos.
+#
+# Antes no la pedían, con este razonamiento: son cotizaciones iguales para
+# todos, así que no hay nada de nadie que proteger. El razonamiento era correcto
+# sobre los DATOS y equivocado sobre el RECURSO. El plan gratuito da 700
+# llamadas por día; sin sesión, cualquiera con la URL las quema en un par de
+# horas a seis por minuto, y el efecto no es un error visible sino una pantalla
+# de inversiones con precios viejos que no explica por qué está así.
+#
+# La sesión no es control de acceso al dato: es lo que hace que el cupo sea de
+# los usuarios y no de internet. El cupo por IP de abajo cubre el resto.
 
 
 @app.get("/api/precio")
-async def api_precio(ticker: str, mercado: str = "us") -> dict:
+async def api_precio(
+    ticker: str,
+    request: Request,
+    mercado: str = "us",
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Precio actual, variación diaria/semanal/mensual y máximos y mínimos.
 
     `mercado=us` (default) para NASDAQ/NYSE, `mercado=ar` para BYMA. No es un
     detalle: AAPL existe en los dos y son activos distintos, en monedas
     distintas y con precios que difieren por ochenta veces.
     """
+    await _exigir_sesion(authorization)
+    _frenar(LIMITE_MERCADO, identificar(request))
+
     try:
         return await precio_de_mercado(ticker, mercado)
     # El orden importa: las dos heredan de MercadoError y Python entra por la
@@ -243,8 +348,17 @@ async def api_precio(ticker: str, mercado: str = "us") -> dict:
 
 
 @app.get("/api/historico")
-async def api_historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
+async def api_historico(
+    ticker: str,
+    request: Request,
+    mercado: str = "us",
+    dias: int = 90,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Cierres diarios de un activo, del más viejo al más nuevo."""
+    await _exigir_sesion(authorization)
+    _frenar(LIMITE_MERCADO, identificar(request))
+
     try:
         return await historico_de_mercado(ticker, mercado, dias)
     except ValorInvalido as exc:
@@ -256,8 +370,15 @@ async def api_historico(ticker: str, mercado: str = "us", dias: int = 90) -> dic
 
 
 @app.get("/api/indice")
-async def api_indice(symbol: str) -> dict:
+async def api_indice(
+    symbol: str,
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Valor de un índice. Acepta ^GSPC (S&P 500) y ^MERV (Merval)."""
+    await _exigir_sesion(authorization)
+    _frenar(LIMITE_MERCADO, identificar(request))
+
     try:
         return await indice_de_mercado(symbol)
     except ValorInvalido as exc:
@@ -268,23 +389,22 @@ async def api_indice(symbol: str) -> dict:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
 
-@app.post("/tareas/alertas/{secret}")
-async def revisar_alertas(secret: str) -> dict:
+@app.post("/tareas/alertas")
+async def revisar_alertas(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Revisa las alertas de precio y avisa las que se cumplieron.
 
     La dispara un cron externo, no una persona, así que va protegida por un
-    secreto en la URL y no por una sesión: no hay nadie logueado del otro lado.
-    Es el mismo criterio que el webhook de Telegram.
+    secreto y no por una sesión: no hay nadie logueado del otro lado. El secreto
+    viaja en la cabecera Authorization —ver _autorizar_tarea— y ya no en la
+    ruta, que quedaba escrita en el log de accesos.
 
     Se ejecuta en el request y no en un BackgroundTask a propósito: el cron
     necesita saber si salió bien, y con 200-y-a-otra-cosa se enteraría siempre
     de que sí.
     """
-    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
-        # 404 y no 403, igual que el webhook: no confirmamos que la ruta exista.
-        logger.warning("Disparo de alertas con secreto inválido")
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
-
+    _autorizar_tarea(authorization)
     return await revisar_alertas_de_precio()
 
 
@@ -303,10 +423,10 @@ async def escribir_narrativa(
     El texto no se guarda desde acá: lo guarda la web en `narrativas`, que es
     donde RLS puede atarlo a su dueño.
     """
-    try:
-        await verificar_sesion(authorization)
-    except SesionInvalida as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    usuario = await _exigir_sesion(authorization)
+    # Por usuario y no por IP: el token ya dice quién es, y así dos personas
+    # detrás de la misma conexión no se gastan el cupo entre ellas.
+    _frenar(LIMITE_GEMINI, usuario)
 
     try:
         texto = await run_in_threadpool(generar_narrativa, datos)
@@ -316,8 +436,10 @@ async def escribir_narrativa(
     return {"texto": texto}
 
 
-@app.post("/tareas/recordatorios/{secret}")
-async def disparar_recordatorios(secret: str) -> dict:
+@app.post("/tareas/recordatorios")
+async def disparar_recordatorios(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Manda el recordatorio diario a quien le toque en esta hora.
 
     Lo llama un cron cada hora, no una persona: mismo criterio que las alertas
@@ -327,15 +449,14 @@ async def disparar_recordatorios(secret: str) -> dict:
     Cada hora y no una vez al día porque la hora la elige cada usuario en su
     zona, y porque un cron que llega tarde no puede perder el envío.
     """
-    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
-        logger.warning("Disparo de recordatorios con secreto inválido")
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
-
+    _autorizar_tarea(authorization)
     return await enviar_recordatorios()
 
 
-@app.post("/tareas/rendimientos/{secret}")
-async def actualizar_tasas_billeteras(secret: str) -> dict:
+@app.post("/tareas/rendimientos")
+async def actualizar_tasas_billeteras(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
     """Refresca las TNA de las billeteras virtuales desde la fuente pública.
 
     Mismo criterio que las alertas: lo llama un cron, va protegido por el mismo
@@ -351,16 +472,21 @@ async def actualizar_tasas_billeteras(secret: str) -> dict:
     el log del cron, no una falla de nuestro servicio. Las tasas anteriores
     quedan intactas.
     """
-    if not ALERTAS_SECRET or not secrets.compare_digest(secret, ALERTAS_SECRET):
-        logger.warning("Disparo de rendimientos con secreto inválido")
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
-
+    _autorizar_tarea(authorization)
     return await run_in_threadpool(actualizar_rendimientos)
 
 
 @app.get("/api/cuota")
-async def api_cuota() -> dict:
-    """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
+async def api_cuota(
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo.
+
+    Pide sesión aunque no devuelva datos de nadie: decía en público cuánto cupo
+    quedaba, que es precisamente el marcador que necesita mirar quien lo está
+    agotando para saber si le está saliendo.
+    """
+    await _exigir_sesion(authorization)
     return presupuesto_mercado()
 
 
@@ -379,10 +505,8 @@ async def analizar_gastos(
     Se resuelve en el request y no en un BackgroundTask —al revés que el
     webhook— porque acá hay alguien esperando la respuesta en pantalla.
     """
-    try:
-        await verificar_sesion(authorization)
-    except SesionInvalida as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+    usuario = await _exigir_sesion(authorization)
+    _frenar(LIMITE_GEMINI, usuario)
 
     try:
         insights = await run_in_threadpool(generar_insights, datos)
@@ -392,26 +516,8 @@ async def analizar_gastos(
     return {"insights": [i.model_dump() for i in insights]}
 
 
-@app.post("/webhook/{secret}")
-async def webhook(
-    secret: str,
-    request: Request,
-    tareas: BackgroundTasks,
-) -> dict[str, bool]:
-    """Punto de entrada de los updates de Telegram.
-
-    Contesta 200 enseguida y deja el trabajo lento (Gemini + base + respuesta)
-    para un BackgroundTask. Telegram espera la respuesta del webhook y, si
-    tarda o falla, reintenta el mismo update: si parseáramos acá, un reintento
-    registraría el gasto dos veces.
-    """
-    # compare_digest y no ==: comparar strings con == corta en el primer
-    # carácter distinto, y ese tiempo distinto permite adivinar el secreto.
-    if not secrets.compare_digest(secret, WEBHOOK_SECRET):
-        logger.warning("Webhook llamado con secreto inválido desde %s", request.client)
-        # 404 y no 403: no confirmamos que la ruta exista.
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
-
+async def _recibir_update(request: Request, tareas: BackgroundTasks) -> dict[str, bool]:
+    """Encola el update. Lo comparten las dos rutas del webhook."""
     try:
         update = await request.json()
     except ValueError:
@@ -422,6 +528,68 @@ async def webhook(
 
     tareas.add_task(procesar_update, update)
     return {"ok": True}
+
+
+@app.post("/webhook")
+async def webhook(
+    request: Request,
+    tareas: BackgroundTasks,
+    x_telegram_bot_api_secret_token: Annotated[str | None, Header()] = None,
+) -> dict[str, bool]:
+    """Punto de entrada de los updates de Telegram, con el secreto en cabecera.
+
+    Telegram manda `X-Telegram-Bot-Api-Secret-Token` en cada update si el
+    webhook se registró pasándole `secret_token`. Es la forma preferible sobre
+    ponerlo en la ruta: la URL entera queda en el log de accesos de Render, y un
+    secreto en un log lo puede leer cualquiera que tenga acceso a los logs.
+
+    Contesta 200 enseguida y deja el trabajo lento (Gemini + base + respuesta)
+    para un BackgroundTask. Telegram espera la respuesta del webhook y, si
+    tarda o falla, reintenta el mismo update: si parseáramos acá, un reintento
+    registraría el gasto dos veces.
+    """
+    # compare_digest y no ==: comparar strings con == corta en el primer
+    # carácter distinto, y ese tiempo distinto permite adivinar el secreto.
+    # Se compara aunque falte la cabecera, para que tardar lo mismo no delate
+    # la diferencia entre "no mandaste nada" y "mandaste algo equivocado".
+    if not secrets.compare_digest(x_telegram_bot_api_secret_token or "", WEBHOOK_SECRET):
+        logger.warning("Webhook llamado con secreto inválido desde %s", request.client)
+        # 404 y no 403: no confirmamos que la ruta exista.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    return await _recibir_update(request, tareas)
+
+
+@app.post("/webhook/{secret}")
+async def webhook_en_ruta(
+    secret: str,
+    request: Request,
+    tareas: BackgroundTasks,
+) -> dict[str, bool]:
+    """La forma vieja: el secreto en la URL. Sigue viva para no cortar el bot.
+
+    No se puede migrar sola, porque el otro extremo lo configura Telegram y eso
+    vive fuera del repositorio: si esta ruta desapareciera al desplegar, el bot
+    quedaría mudo hasta que alguien corriera setWebhook a mano.
+
+    Registrá el webhook con `secret_token` (ver README) y esta ruta deja de
+    recibir tráfico; ahí se puede borrar. El aviso de abajo sale una vez por
+    arranque, para que no pase inadvertido y no llene el log.
+    """
+    if not secrets.compare_digest(secret, WEBHOOK_SECRET):
+        logger.warning("Webhook llamado con secreto inválido desde %s", request.client)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    global _aviso_webhook_viejo
+    if not _aviso_webhook_viejo:
+        _aviso_webhook_viejo = True
+        logger.warning(
+            "El webhook sigue usando el secreto en la RUTA, que queda escrito "
+            "en el log de accesos. Volvé a registrarlo con secret_token para "
+            "que viaje en la cabecera."
+        )
+
+    return await _recibir_update(request, tareas)
 
 
 async def procesar_update(update: Any) -> None:
@@ -603,9 +771,24 @@ async def _avisar_sin_acceso(chat_id: int) -> None:
         logger.info("Chat %s sin acceso (aviso ya mandado, no repito)", chat_id)
         return
 
+    if len(_ultimo_aviso) >= TOPE_AVISOS:
+        _podar_avisos(ahora)
+
     _ultimo_aviso[chat_id] = ahora
     logger.warning("Chat %s sin acceso: le aviso", chat_id)
     await _responder(chat_id, MSG_SIN_ACCESO.format(chat_id=chat_id))
+
+
+def _podar_avisos(ahora: float) -> None:
+    """Saca los avisos ya vencidos y, si sigue lleno, los más viejos."""
+    for chat, cuando in list(_ultimo_aviso.items()):
+        if ahora - cuando >= ESPERA_SIN_ACCESO:
+            del _ultimo_aviso[chat]
+
+    if len(_ultimo_aviso) >= TOPE_AVISOS:
+        viejos = sorted(_ultimo_aviso, key=_ultimo_aviso.get)
+        for chat in viejos[: len(_ultimo_aviso) - TOPE_AVISOS + 1]:
+            del _ultimo_aviso[chat]
 
 
 async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) -> str:

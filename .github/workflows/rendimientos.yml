@@ -45,13 +45,20 @@ jobs:
           # --max-time bien largo: entre despertar Render y bajar los 33 MB de
           # JSON de la CAFCI, esta tarea tarda bastante más que la de alertas.
           #
-          # El secreto va en la URL, así que -s y --output evitan que aparezca
-          # en el log de la corrida, que es público en un repo público.
+          # El secreto viaja en la cabecera Authorization y NO en la URL.
+          # Antes iba en la ruta, y eso lo dejaba escrito en el log de accesos
+          # del servidor en cada corrida: un secreto en un log deja de ser un
+          # secreto. La cabecera no se registra ahi.
+          #
+          # Va con --header y no interpolado en el comando para que el valor no
+          # aparezca nunca en el `set -x` ni en un mensaje de error de curl.
+
           codigo=$(curl -s -X POST \
             --max-time 300 \
             --retry 2 --retry-delay 30 --retry-connrefused \
             -o respuesta.json -w "%{http_code}" \
-            "$BACKEND_URL/tareas/rendimientos/$ALERTAS_SECRET")
+            -H "Authorization: Bearer $ALERTAS_SECRET" \
+            "$BACKEND_URL/tareas/rendimientos")
 
           echo "HTTP $codigo"
           cat respuesta.json

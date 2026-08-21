@@ -55,3 +55,7 @@ tools/*
 .idea/
 Thumbs.db
 desktop.ini
+
+# Permisos de Claude Code: son de esta máquina, no del proyecto.
+# Las skills de .claude/skills/ sí se versionan: son parte del repo.
+.claude/settings.local.json
