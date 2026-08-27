@@ -172,9 +172,8 @@ function bloqueCerradas(cerradas, abierto) {
   const cabecera = `
     <div class="tarjeta-cabecera">
       <h2 class="tarjeta-titulo">Cerradas · ${cerradas.length}</h2>
-      <button class="boton-secundario" data-alternar-cerradas aria-expanded="${abierto}">
-        ${abierto ? "Ocultar" : "Ver historial"}
-      </button>
+      <button class="chip ${abierto ? "es-activo" : ""}" data-alternar-cerradas
+              aria-expanded="${abierto}">${abierto ? "Ocultar" : "Ver historial"}</button>
     </div>`;
 
   if (!abierto) return `<section class="tarjeta">${cabecera}</section>`;
@@ -206,7 +205,7 @@ function bloqueCerradas(cerradas, abierto) {
   return `
     <section class="tarjeta">
       ${cabecera}
-      <p class="apunte-tenue">
+      <p class="nota-precios">
         No se valúan contra el mercado ni entran en los totales: ya no son tuyas.
       </p>
       <ul class="posiciones">${filas}</ul>
@@ -258,7 +257,7 @@ export function renderInversiones(contenedor, ctx) {
       Cerraste ${cerradas.length} ${cerradas.length === 1 ? "tenencia" : "tenencias"}.
       Decile al bot algo como «compré 10 CEDEARs de Apple a US$25» para empezar
       un portafolio nuevo.</p>
-      <button class="boton-secundario" data-ver-cerradas>Ver el historial de cerradas</button>`;
+      <button class="boton boton-chico" data-ver-cerradas>Ver el historial de cerradas</button>`;
     const ver = contenedor.querySelector("[data-ver-cerradas]");
     if (ver) ver.addEventListener("click", () => alternarCerradas?.(true));
     return;

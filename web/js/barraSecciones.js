@@ -26,13 +26,30 @@ export function montarBarra(nav, secciones, alTocar) {
 
   mudarControles(nav);
 
-  if (!oyenteDeAncho) {
-    oyenteDeAncho = () => moverPastilla(nav, nav.querySelector(".tab.es-activo"));
-    window.addEventListener("resize", oyenteDeAncho);
-  }
+  if (oyenteDeAncho) window.removeEventListener("resize", oyenteDeAncho);
+  oyenteDeAncho = () => moverPastilla(nav, nav.querySelector(".tab.es-activo"));
+  window.addEventListener("resize", oyenteDeAncho);
+
+  // La pastilla se mide con offsetLeft, asi que hay que volver a medirla cada
+  // vez que cambian los anchos: cuando entra la tipografia (Inter llega de
+  // Google Fonts DESPUES del primer pintado y ensancha cada boton) y cuando se
+  // mueven los controles adentro de la barra. Sin esto queda corrida.
+  document.fonts?.ready.then(oyenteDeAncho).catch(() => {});
+  observarAncho(nav);
 }
 
 let oyenteDeAncho = null;
+let observador = null;
+
+/** Reubica la pastilla ante cualquier cambio de tamaño de la barra. */
+function observarAncho(nav) {
+  if (observador) observador.disconnect();
+  if (typeof ResizeObserver !== "function") return;
+  observador = new ResizeObserver(() => oyenteDeAncho?.());
+  observador.observe(nav);
+  const grupo = nav.querySelector(".tabs-grupo");
+  if (grupo) observador.observe(grupo);
+}
 
 /** Devuelve los controles al encabezado si estaban dentro de la barra. */
 function rescatarControles(nav) {
@@ -63,8 +80,12 @@ function moverPastilla(nav, activo) {
 
   if (!activo.offsetWidth && !activo.offsetHeight) return;
 
-  pastilla.style.setProperty("--x", `${activo.offsetLeft}px`);
-  pastilla.style.setProperty("--y", `${activo.offsetTop}px`);
+  const grupo = activo.offsetParent === nav ? null : activo.offsetParent;
+  const dx = grupo ? grupo.offsetLeft : 0;
+  const dy = grupo ? grupo.offsetTop : 0;
+
+  pastilla.style.setProperty("--x", `${activo.offsetLeft + dx}px`);
+  pastilla.style.setProperty("--y", `${activo.offsetTop + dy}px`);
   pastilla.style.setProperty("--w", `${activo.offsetWidth}px`);
   pastilla.style.setProperty("--h", `${activo.offsetHeight}px`);
   pastilla.dataset.lista = "si";
