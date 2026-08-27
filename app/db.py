@@ -83,6 +83,24 @@ def vinculo_de_chat(chat_id: int) -> dict | None:
     return filas[0] if filas else None
 
 
+def pausar_cuenta(user_id: str, motivo: str = "") -> None:
+    """Pone el perfil en 'pausado'. Va por la clave de servicio, no por el RPC
+    de superusuario: acá no hay una persona logueada que lo autorice."""
+    user_id = _exigir(user_id)
+    try:
+        (
+            _obtener_cliente()
+            .table(TABLA_PERFILES)
+            .update({"estado": "pausado"})
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude pausar la cuenta: {detalle}") from exc
+    logger.warning("Cuenta %s pausada automáticamente. %s", user_id, motivo)
+
+
 def perfil_de(user_id: str) -> dict | None:
     """El perfil de un usuario, con su estado de cuenta. None si no existe."""
     user_id = _exigir(user_id)

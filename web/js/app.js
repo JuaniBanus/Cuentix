@@ -491,7 +491,8 @@ async function cargarInversiones() {
   if (mercado.status === "fulfilled") {
     estado.preciosMercado = mercado.value.precios;
     estado.sinCoberturaMercado = mercado.value.sinCobertura;
-    estado.errorMercado = mercado.value.error;
+    estado.errorMercado = mercado.value.error || mercado.value.aviso;
+    estado.cupoMercado = mercado.value.cupo;
   } else {
     estado.errorMercado = "No pude traer los precios de mercado.";
   }

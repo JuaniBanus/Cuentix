@@ -89,35 +89,33 @@ export async function traerPrecios(inversiones) {
   }
 
   const precios = {};
-  const sinCobertura = [];
-  let error = null;
+  if (!pedidos.size) return { precios, sinCobertura: [], error: null, aviso: null, cupo: null };
 
-  for (const [clave, { ticker, mercado }] of pedidos) {
-    try {
-      const datos = await pedir(
-        `/api/precio?ticker=${encodeURIComponent(ticker)}&mercado=${mercado}`
-      );
-      if (Number.isFinite(datos?.precio)) {
-        precios[clave] = datos;
-        guardar(clave, datos.precio, datos.moneda);
-      } else {
-        sinCobertura.push(ticker);
-      }
-    } catch (problema) {
-      if (problema.sinConfigurar || problema.sinSesion || problema.demasiadosPedidos) {
-        error = problema.message;
-        break;
-      }
-      if (problema.sinCobertura) sinCobertura.push(ticker);
-      else {
-        error = problema.message;
-        break;
-      }
+  const entradas = [...pedidos.values()];
+  const tickers = entradas.map((p) => p.ticker).join(",");
+  const mercados = entradas.map((p) => p.mercado).join(",");
+
+  try {
+    const datos = await pedir(
+      `/api/precios?tickers=${encodeURIComponent(tickers)}&mercados=${encodeURIComponent(mercados)}`
+    );
+    for (const [clave, dato] of Object.entries(datos?.precios || {})) {
+      if (!Number.isFinite(dato?.precio)) continue;
+      precios[clave] = dato;
+      guardar(clave, dato.precio, dato.moneda);
     }
+    return {
+      precios,
+      sinCobertura: datos?.sin_cobertura || [],
+      error: null,
+      aviso: datos?.aviso || null,
+      cupo: datos?.cupo || null,
+    };
+  } catch (problema) {
+    return { precios, sinCobertura: [], error: problema.message, aviso: null, cupo: null };
   }
-
-  return { precios, sinCobertura, error };
 }
+
 
 /** Serie de cierres para el gráfico de un activo. */
 export async function traerHistorico(ticker, mercado, dias = 90) {

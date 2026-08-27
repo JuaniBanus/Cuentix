@@ -19,6 +19,7 @@ URL_TWELVE = "https://api.twelvedata.com"
 URL_DATA912 = "https://data912.com"
 
 TTL_SEGUNDOS = 30 * 60
+TTL_CERRADO = 6 * 60 * 60
 
 TOPE_DIARIO = 700
 TOPE_POR_MINUTO = 6
@@ -44,7 +45,7 @@ class ValorInvalido(MercadoError):
     """El pedido está mal armado. Es culpa de quien llama, no del proveedor."""
 
 
-_cache: dict[str, tuple[Any, float]] = {}
+_cache: dict[str, tuple[Any, float, float]] = {}
 _cliente: httpx.AsyncClient | None = None
 
 _gastadas = 0
@@ -97,13 +98,16 @@ def _guardado(clave: str) -> tuple[Any, bool] | None:
     """(dato, vencido) o None si nunca se pidió."""
     if clave not in _cache:
         return None
-    dato, momento = _cache[clave]
-    return dato, (time.monotonic() - momento) > TTL_SEGUNDOS
+    dato, momento, ttl = _cache[clave]
+    return dato, (time.monotonic() - momento) > ttl
 
 
-def _guardar(clave: str, dato: Any) -> None:
+def _guardar(clave: str, dato: Any, ttl: float | None = None) -> None:
     _cache.pop(clave, None)
-    _cache[clave] = (dato, time.monotonic())
+    if ttl is None:
+        abierto = dato.get("abierto") if isinstance(dato, dict) else None
+        ttl = TTL_SEGUNDOS if abierto is not False else TTL_CERRADO
+    _cache[clave] = (dato, time.monotonic(), ttl)
 
     if len(_cache) > TOPE_CACHE:
         for vieja in list(_cache)[: len(_cache) - TOPE_CACHE]:
@@ -217,6 +221,7 @@ async def _armar(simbolo: str, etiqueta: str) -> dict:
             "max": _numero(cincuenta_dos.get("high")),
         },
         "actualizado": quote.get("datetime"),
+        "abierto": quote.get("is_market_open"),
         "fuente": "twelvedata",
     }
 
@@ -415,3 +420,64 @@ async def indice(symbol: str) -> dict:
     datos["simbolo"] = pedido
     _guardar(clave, datos)
     return {**datos, "cacheado": False, "vencido": False}
+
+
+UNIDADES_POR_PRECIO = 2
+TOPE_LOTE = 25
+
+
+def costo(ticker: str, mercado: str = "us") -> int:
+    """Cuántas llamadas al proveedor costaría este precio ahora mismo."""
+    try:
+        ticker = _limpiar_ticker(ticker)
+        mercado = _limpiar_mercado(mercado)
+    except ValorInvalido:
+        return 0
+    if mercado == "ar":
+        return 0
+    guardado = _guardado(f"precio:{mercado}:{ticker}")
+    return 0 if (guardado and not guardado[1]) else UNIDADES_POR_PRECIO
+
+
+def costo_lote(pedidos: list[tuple[str, str]]) -> int:
+    """Lo que costaría todo el lote, sin contar lo que ya está fresco en caché."""
+    return sum(costo(t, m) for t, m in pedidos)
+
+
+async def precios(pedidos: list[tuple[str, str]], solo_cache: bool = False) -> dict[str, Any]:
+    """Precios de varios activos, en un mapa por «mercado:TICKER».
+
+    Con `solo_cache` no se llama al proveedor: se sirve lo guardado aunque esté
+    vencido. Es el modo degradado para cuando el usuario se quedó sin cupo.
+    """
+    if len(pedidos) > TOPE_LOTE:
+        raise ValorInvalido(f"Son demasiados activos de una vez (máximo {TOPE_LOTE}).")
+
+    resultados: dict[str, Any] = {}
+    sin_cobertura: list[str] = []
+
+    for crudo_ticker, crudo_mercado in pedidos:
+        try:
+            ticker = _limpiar_ticker(crudo_ticker)
+            mercado = _limpiar_mercado(crudo_mercado)
+        except ValorInvalido:
+            sin_cobertura.append(str(crudo_ticker))
+            continue
+
+        clave = f"{mercado}:{ticker}"
+        if solo_cache:
+            guardado = _guardado(f"precio:{mercado}:{ticker}")
+            if guardado:
+                resultados[clave] = {**guardado[0], "cacheado": True, "vencido": guardado[1]}
+            else:
+                sin_cobertura.append(ticker)
+            continue
+
+        try:
+            resultados[clave] = await precio(ticker, mercado)
+        except ValorInvalido:
+            sin_cobertura.append(ticker)
+        except MercadoError:
+            sin_cobertura.append(ticker)
+
+    return {"precios": resultados, "sin_cobertura": sin_cobertura}

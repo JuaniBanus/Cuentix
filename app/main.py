@@ -26,6 +26,9 @@ from app.cuotas import pedir_faltantes as pedir_faltantes_cuotas
 from app.cuotas import redactar as redactar_cuotas
 from app.tasas import obtener as obtener_tasas
 from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
+from app.cupos import CupoAgotado, barriendo
+from app.cupos import consumir as consumir_cupo
+from app.cupos import restante as cupo_restante
 from app.limites import Limite, LimiteExcedido, identificar
 from app.alertas import revisar as revisar_alertas_de_precio
 from app.insights import AgregadosGastos, InsightsError
@@ -34,9 +37,10 @@ from app.mercado import MercadoError, SinClave, ValorInvalido
 from app.mercado import cerrar_cliente as cerrar_cliente_mercado
 from app.mercado import historico as historico_de_mercado
 from app.mercado import indice as indice_de_mercado
+from app.mercado import costo_lote, precios as precios_de_mercado
 from app.mercado import precio as precio_de_mercado
 from app.mercado import presupuesto as presupuesto_mercado
-from app.sesion_web import SesionInvalida
+from app.sesion_web import CuentaInactiva, SesionInvalida
 from app.sesion_web import cerrar_cliente as cerrar_cliente_sesion
 from app.sesion_web import verificar as verificar_sesion
 from app.inflacion import detectar_salto
@@ -77,6 +81,7 @@ from app.db import (
     obtener_inversiones,
     obtener_objetivos,
     obtener_rendimientos,
+    pausar_cuenta as pausar_cuenta_db,
     total_imputado,
     totales_por_categoria,
     totales_por_moneda,
@@ -160,12 +165,38 @@ def _frenar(limite: Limite, clave: str) -> None:
         ) from exc
 
 
-async def _exigir_sesion(authorization: str | None) -> str:
+async def _exigir_sesion(authorization: str | None, activo: bool = False) -> str:
     """El id del usuario dueño del token, o un 401 con el motivo."""
     try:
-        return await verificar_sesion(authorization)
+        return await verificar_sesion(authorization, exigir_activo=activo)
+    except CuentaInactiva as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except SesionInvalida as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+
+def _cobrar(user_id: str, unidades: int, tickers: list[str]) -> None:
+    """Cobra unidades sueltas (sin gastar un refresco) o corta con un 429."""
+    if not unidades:
+        return
+    try:
+        consumir_cupo(user_id, unidades, refrescos=0, tickers=tickers)
+    except CupoAgotado as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": "3600"}
+        ) from exc
+
+
+async def _pausar_por_abuso(user_id: str, estado: dict) -> None:
+    """Pausa la cuenta que barre tickers en vez de mirar su portafolio."""
+    if not barriendo(estado):
+        return
+    logger.warning("Patrón de barrido en %s: %s tickers distintos hoy",
+                   user_id, estado.get("tickers"))
+    try:
+        pausar_cuenta_db(user_id, 'barrido de tickers')
+    except Exception:
+        logger.exception("No pude pausar la cuenta %s", user_id)
 
 
 def _autorizar_tarea(authorization: str | None) -> None:
@@ -228,6 +259,53 @@ async def salud() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/precios")
+async def api_precios(
+    tickers: str,
+    request: Request,
+    mercados: str = "",
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    """Precios de todo un portafolio en un solo pedido.
+
+    `tickers` es una lista separada por comas y `mercados` la lista paralela de
+    mercados; si falta, se asume «us» para todos. Cada llamada cuenta como una
+    actualización del cupo diario del usuario.
+    """
+    usuario = await _exigir_sesion(authorization, activo=True)
+    _frenar(LIMITE_MERCADO, identificar(request))
+
+    lista = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not lista:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No pediste ningún ticker.")
+
+    columnas = [m.strip().lower() or "us" for m in mercados.split(",")] if mercados else []
+    pedidos = [(t, columnas[i] if i < len(columnas) else "us") for i, t in enumerate(lista)]
+
+    unidades = costo_lote(pedidos)
+    aviso = None
+    solo_cache = False
+
+    if unidades:
+        try:
+            estado = consumir_cupo(usuario, unidades, refrescos=1, tickers=lista)
+            await _pausar_por_abuso(usuario, estado)
+        except CupoAgotado as exc:
+            logger.info("Cupo agotado para %s (%s)", usuario, exc.motivo)
+            aviso, solo_cache = str(exc), True
+
+    try:
+        datos = await precios_de_mercado(pedidos, solo_cache=solo_cache)
+    except ValorInvalido as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except SinClave as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except MercadoError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+
+    return {**datos, "aviso": aviso, "cupo": cupo_restante(usuario)}
+
+
 @app.get("/api/precio")
 async def api_precio(
     ticker: str,
@@ -236,8 +314,9 @@ async def api_precio(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Precio actual, variación diaria/semanal/mensual y máximos y mínimos."""
-    await _exigir_sesion(authorization)
+    usuario = await _exigir_sesion(authorization, activo=True)
     _frenar(LIMITE_MERCADO, identificar(request))
+    _cobrar(usuario, costo_lote([(ticker, mercado)]), [ticker])
 
     try:
         return await precio_de_mercado(ticker, mercado)
@@ -258,8 +337,9 @@ async def api_historico(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Cierres diarios de un activo, del más viejo al más nuevo."""
-    await _exigir_sesion(authorization)
+    usuario = await _exigir_sesion(authorization, activo=True)
     _frenar(LIMITE_MERCADO, identificar(request))
+    _cobrar(usuario, 0 if mercado == "ar" else 1, [ticker])
 
     try:
         return await historico_de_mercado(ticker, mercado, dias)
@@ -278,8 +358,9 @@ async def api_indice(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Valor de un índice. Acepta ^GSPC (S&P 500) y ^MERV (Merval)."""
-    await _exigir_sesion(authorization)
+    usuario = await _exigir_sesion(authorization, activo=True)
     _frenar(LIMITE_MERCADO, identificar(request))
+    _cobrar(usuario, 2, [symbol])
 
     try:
         return await indice_de_mercado(symbol)
@@ -306,7 +387,7 @@ async def escribir_narrativa(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     """Redacta el resumen del mes a partir de agregados."""
-    usuario = await _exigir_sesion(authorization)
+    usuario = await _exigir_sesion(authorization, activo=True)
     _frenar(LIMITE_GEMINI, usuario)
 
     try:
@@ -340,7 +421,7 @@ async def api_cuota(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
-    await _exigir_sesion(authorization)
+    await _exigir_sesion(authorization, activo=True)
     return presupuesto_mercado()
 
 
@@ -350,7 +431,7 @@ async def analizar_gastos(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, list]:
     """Interpreta agregados de gasto y devuelve observaciones."""
-    usuario = await _exigir_sesion(authorization)
+    usuario = await _exigir_sesion(authorization, activo=True)
     _frenar(LIMITE_GEMINI, usuario)
 
     try:
