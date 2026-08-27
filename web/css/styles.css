@@ -1611,3 +1611,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   .usuario-datos { grid-column: 1 / -1; }
 }
+
+.posicion.es-cerrada { opacity: .62; }
+.posicion.es-cerrada .posicion-marca { filter: grayscale(1); }

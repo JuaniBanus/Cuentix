@@ -89,6 +89,10 @@ async function arrancar() {
       alEntrarA: cargarLoDelTab,
       recargarInversiones: cargarInversiones,
       verHistorico,
+      alternarCerradas: (abierto) => {
+        estado.verCerradas = abierto;
+        pintar();
+      },
       analizarGastos,
       generarNarrativa,
       verNarrativaDe,
@@ -474,7 +478,7 @@ async function cargarInversiones() {
 
   pintar();
 
-  const conTicker = estado.inversiones.filter((i) => i.ticker);
+  const conTicker = estado.inversiones.filter((i) => i.ticker && i.activa);
   if (!conTicker.length) return;
 
   const [cripto, mercado] = await Promise.allSettled([

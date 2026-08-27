@@ -41,6 +41,7 @@ function estadoInicial() {
     errorMercado: null,
     sinCoberturaMercado: [],
     historico: null,
+    verCerradas: false,
     insights: [],
     insightsCargando: false,
     insightsPedidos: false,

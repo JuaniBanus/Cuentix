@@ -167,6 +167,52 @@ function bloqueHistorico(historico) {
     </section>`;
 }
 
+/** Las que ya se vendieron: costo de compra, sin valuar contra el mercado. */
+function bloqueCerradas(cerradas, abierto) {
+  const cabecera = `
+    <div class="tarjeta-cabecera">
+      <h2 class="tarjeta-titulo">Cerradas · ${cerradas.length}</h2>
+      <button class="boton-secundario" data-alternar-cerradas aria-expanded="${abierto}">
+        ${abierto ? "Ocultar" : "Ver historial"}
+      </button>
+    </div>`;
+
+  if (!abierto) return `<section class="tarjeta">${cabecera}</section>`;
+
+  const filas = cerradas
+    .map((i) => {
+      const costo = Number(i.cantidad) * Number(i.precio_compra);
+      return `
+      <li class="posicion es-cerrada">
+        <span class="posicion-marca" aria-hidden="true">${esc(String(i.ticker ?? i.nombre ?? "").slice(0, 4))}</span>
+        <span class="posicion-texto">
+          <span class="posicion-titulo">${i.ticker ? esc(i.ticker) : esc(i.nombre)}</span>
+          <span class="posicion-sub">
+            ${cantidad(i.cantidad)} × ${monto(i.precio_compra, i.moneda)} ·
+            ${i.ticker ? esc(i.nombre) : ETIQUETA_TIPO[i.tipo] ?? esc(i.tipo)}
+          </span>
+          <span class="posicion-sub posicion-fecha">
+            ${fechaCorta(i.fecha_compra)}${i.cerrada_en ? ` → ${fechaCorta(i.cerrada_en)}` : ""}
+          </span>
+        </span>
+        <span class="posicion-cifras">
+          <span class="posicion-valor">${monto(costo, i.moneda)}</span>
+          <span class="posicion-gp es-sin-dato">costo de compra</span>
+        </span>
+      </li>`;
+    })
+    .join("");
+
+  return `
+    <section class="tarjeta">
+      ${cabecera}
+      <p class="apunte-tenue">
+        No se valúan contra el mercado ni entran en los totales: ya no son tuyas.
+      </p>
+      <ul class="posiciones">${filas}</ul>
+    </section>`;
+}
+
 /** "hace 5 min" · "hace 3 h" · "el 4 ago". */
 function fechaDeMomento(momento) {
   if (!momento) return "sin fecha";
@@ -186,6 +232,7 @@ export function renderInversiones(contenedor, ctx) {
     precios, errorPrecios, sinCotizar,
     preciosMercado, errorMercado, sinCoberturaMercado,
     historico, verHistorico,
+    verCerradas, alternarCerradas,
   } = ctx;
 
   if (errorInversiones) {
@@ -202,6 +249,21 @@ export function renderInversiones(contenedor, ctx) {
     return;
   }
 
+  const activas = inversiones.filter((i) => i.activa);
+  const cerradas = inversiones.filter((i) => !i.activa);
+
+  if (inversiones.length && !activas.length && !verCerradas) {
+    contenedor.innerHTML = `
+      <p class="vacio">No tenés posiciones abiertas 🌱<br>
+      Cerraste ${cerradas.length} ${cerradas.length === 1 ? "tenencia" : "tenencias"}.
+      Decile al bot algo como «compré 10 CEDEARs de Apple a US$25» para empezar
+      un portafolio nuevo.</p>
+      <button class="boton-secundario" data-ver-cerradas>Ver el historial de cerradas</button>`;
+    const ver = contenedor.querySelector("[data-ver-cerradas]");
+    if (ver) ver.addEventListener("click", () => alternarCerradas?.(true));
+    return;
+  }
+
   if (!inversiones.length) {
     contenedor.innerHTML = `
       <p class="vacio">Todavía no cargaste inversiones 🌱<br>
@@ -209,7 +271,7 @@ export function renderInversiones(contenedor, ctx) {
     return;
   }
 
-  const posiciones = evaluar(inversiones, precios, preciosMercado);
+  const posiciones = evaluar(activas, precios, preciosMercado);
 
   const monedas = [...new Set(posiciones.map((p) => p.moneda))].sort();
 
@@ -300,9 +362,11 @@ export function renderInversiones(contenedor, ctx) {
     ${historico ? bloqueHistorico(historico) : ""}
 
     <section class="bloque">
-      <h2 class="tarjeta-titulo">Posiciones</h2>
+      <h2 class="tarjeta-titulo">Posiciones abiertas · ${posiciones.length}</h2>
       <ul class="posiciones">${posiciones.map(filaPosicion).join("")}</ul>
-    </section>`;
+    </section>
+
+    ${cerradas.length ? bloqueCerradas(cerradas, !!verCerradas) : ""}`;
 
   const SIN_TASAS = `<p class="vacio">No pude traer las cotizaciones, y sin una
     moneda común el reparto porcentual no significaría nada.</p>`;
@@ -355,4 +419,7 @@ export function renderInversiones(contenedor, ctx) {
   }
   const cerrar = contenedor.querySelector("[data-cerrar-historico]");
   if (cerrar) cerrar.addEventListener("click", () => verHistorico?.(null));
+
+  const alternar = contenedor.querySelector("[data-alternar-cerradas]");
+  if (alternar) alternar.addEventListener("click", () => alternarCerradas?.(!verCerradas));
 }

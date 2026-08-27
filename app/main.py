@@ -74,6 +74,7 @@ from app.db import (
     reto_activo,
     historial_de_item,
     movimientos_para_termometro,
+    cerrar_inversiones,
     guardar_inversion,
     guardar_movimiento,
     guardar_movimientos,
@@ -673,6 +674,9 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) 
     if intencion is Intencion.REGISTRAR_INVERSION:
         return await _resolver_inversion(interpretacion, user_id)
 
+    if intencion is Intencion.CERRAR_INVERSION:
+        return await _resolver_cierre(interpretacion, user_id)
+
     if intencion is Intencion.CREAR_ALERTA:
         return await _resolver_alerta(interpretacion, chat_id, user_id)
 
@@ -1164,10 +1168,53 @@ async def _resolver_inversion(interpretacion: Interpretacion, user_id: str) -> s
 
     inversion = interpretacion.inversion
     inversion_id = await run_in_threadpool(
-        guardar_inversion, inversion, user_id=user_id
+        cerrar_inversiones,
+    guardar_inversion, inversion, user_id=user_id
     )
     logger.info("Inversión %s guardada: %s", inversion_id, inversion)
     return _confirmacion_inversion(inversion)
+
+
+async def _resolver_cierre(interpretacion: Interpretacion, user_id: str) -> str:
+    """Cierra una tenencia vendida. No borra: la deja en el historial."""
+    if interpretacion.faltantes:
+        return _pedir_faltantes(interpretacion.faltantes)
+
+    busqueda = interpretacion.cierre or ""
+    try:
+        cerradas = await run_in_threadpool(
+            cerrar_inversiones, busqueda, user_id=user_id, fecha=interpretacion.cierre_fecha
+        )
+    except DBError as exc:
+        logger.warning("No pude cerrar «%s»: %s", busqueda, exc)
+        return f"No pude cerrar esa inversión. {exc}"
+
+    if not cerradas:
+        return (
+            f"No encontré ninguna inversión abierta que coincida con «{busqueda}».\n\n"
+            "Fijate el nombre exacto en la pantalla de Inversiones, o probá con el "
+            "ticker: «vendí GGAL»."
+        )
+
+    return _confirmacion_cierre(cerradas, interpretacion.cierre_fecha)
+
+
+def _confirmacion_cierre(cerradas: list[dict], fecha) -> str:
+    """Ej: '📉 Posición cerrada · 13 GGAL (Galicia)'."""
+    lineas = []
+    for fila in cerradas:
+        identidad = (
+            f"{fila['ticker']} ({fila['nombre']})" if fila.get("ticker") else fila["nombre"]
+        )
+        lineas.append(f"{_formatear_cantidad(fila['cantidad'])} {identidad}")
+
+    titulo = "📉 Posición cerrada" if len(cerradas) == 1 else f"📉 {len(cerradas)} posiciones cerradas"
+    cuando = f" el {fecha:%d/%m}" if fecha else ""
+    return (
+        f"{titulo}{cuando}\n"
+        + "\n".join(lineas)
+        + "\n\nNo la borré: queda en el historial de la pantalla de Inversiones."
+    )
 
 
 def _pedir_faltantes(faltantes: tuple[str, ...]) -> str:
@@ -1373,6 +1420,7 @@ ETIQUETA_FALTANTE = {
     "nombre": "qué compraste",
     "cantidad": "cuántas unidades compraste",
     "precio_compra": "a qué precio por unidad",
+    "que_inversion": "cuál inversión cerraste (nombre o ticker)",
 }
 
 _ETIQUETA_TIPO = {
