@@ -128,6 +128,8 @@ export function pintar(conEntrada = false) {
     sinCoberturaMercado: estado.sinCoberturaMercado,
     historico: estado.historico,
     verHistorico: acciones.verHistorico,
+    verCerradas: estado.verCerradas,
+    alternarCerradas: acciones.alternarCerradas,
     insights: estado.insights,
     insightsCargando: estado.insightsCargando,
     insightsPedidos: estado.insightsPedidos,

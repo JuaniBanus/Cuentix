@@ -801,6 +801,66 @@ def gastado_en_reto(reto: dict, *, user_id: str) -> Decimal:
     return total
 
 
+def cerrar_inversiones(busqueda: str, *, user_id: str, fecha: date | None = None) -> list[dict]:
+    """Marca como cerradas las tenencias activas que coincidan. Nunca borra.
+
+    Busca por ticker exacto primero y por nombre parcial después: «vendí YPF»
+    tiene que encontrar tanto el ticker YPFD como el nombre «YPF Sociedad».
+    """
+    dueno = _exigir(user_id)
+    termino = (busqueda or "").strip()
+    if not termino:
+        raise DBError("No me dijiste qué inversión cerrar.")
+
+    cliente = _obtener_cliente()
+    columnas = "id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra"
+
+    try:
+        filas = (
+            cliente.table(TABLA_INVERSIONES)
+            .select(columnas)
+            .eq("user_id", dueno)
+            .eq("activa", True)
+            .ilike("ticker", termino)
+            .execute()
+        ).data or []
+
+        if not filas:
+            filas = (
+                cliente.table(TABLA_INVERSIONES)
+                .select(columnas)
+                .eq("user_id", dueno)
+                .eq("activa", True)
+                .ilike("nombre", f"%{termino}%")
+                .execute()
+            ).data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude buscar la inversión: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red buscando la inversión a cerrar")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not filas:
+        return []
+
+    cierre = (fecha or date.today()).isoformat()
+    try:
+        (
+            cliente.table(TABLA_INVERSIONES)
+            .update({"activa": False, "cerrada_en": cierre})
+            .in_("id", [f["id"] for f in filas])
+            .eq("user_id", dueno)
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        raise DBError(f"No pude cerrar la inversión: {detalle}") from exc
+
+    logger.info("Cerradas %s tenencias de %s por «%s»", len(filas), dueno, termino)
+    return filas
+
+
 def obtener_inversiones(*, user_id: str, limite: int = 100) -> list[dict]:
     """Las tenencias del usuario. Hoy solo se usa para saber si tiene alguna."""
     dueno = _exigir(user_id)
@@ -810,6 +870,7 @@ def obtener_inversiones(*, user_id: str, limite: int = 100) -> list[dict]:
             .table(TABLA_INVERSIONES)
             .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra")
             .eq("user_id", dueno)
+            .eq("activa", True)
             .limit(limite)
             .execute()
             .data

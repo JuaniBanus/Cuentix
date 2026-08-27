@@ -217,7 +217,7 @@ export async function traerInversiones() {
   for (let pagina = 0; ; pagina++) {
     const consulta = sb
       .from("inversiones")
-      .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra, sector")
+      .select("id, tipo, ticker, nombre, cantidad, precio_compra, moneda, fecha_compra, sector, activa, cerrada_en")
       .order("fecha_compra", { ascending: false })
       .order("created_at", { ascending: false })
       .range(pagina * PAGINA, (pagina + 1) * PAGINA - 1);
@@ -230,6 +230,7 @@ export async function traerInversiones() {
         ...f,
         cantidad: Number(f.cantidad),
         precio_compra: Number(f.precio_compra),
+        activa: f.activa !== false,
       }));
     }
   }

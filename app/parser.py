@@ -79,6 +79,11 @@ class _InversionExtraida(BaseModel):
     sector: str | None = None
 
 
+class _CierreExtraido(BaseModel):
+    busqueda: str | None = None
+    fecha: date | None = None
+
+
 class _AlertaExtraida(BaseModel):
     ticker: str | None = None
     mercado: str | None = None
@@ -144,6 +149,7 @@ class _InterpretacionExtraida(BaseModel):
     financiacion: _FinanciacionExtraida | None = None
     consulta: _ConsultaExtraida | None = None
     inversion: _InversionExtraida | None = None
+    cierre: _CierreExtraido | None = None
     alerta: _AlertaExtraida | None = None
 
 
@@ -159,6 +165,8 @@ class Interpretacion(NamedTuple):
     financiacion: Financiacion | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
+    cierre: str | None = None
+    cierre_fecha: date | None = None
     alerta: Alerta | None = None
     objetivo: str | None = None
     faltantes: tuple[str, ...] = ()
@@ -384,6 +392,25 @@ cotización que creas saber ni una cantidad con un 1 por defecto: el sistema
 se encarga de preguntar lo que falte.
 Ejemplo: "compré bitcoin" -> tipo=cripto, ticker=BTC, nombre=Bitcoin,
 cantidad=null, precio_compra=null.
+
+===================== SI VENDIÓ O CERRÓ UNA INVERSIÓN =====================
+Poné intencion="cerrar_inversion" y completá "cierre". El resto en null.
+
+Es lo contrario de registrar_inversion: el activo SALE de la cartera.
+  "vendí mis acciones de Apple"
+  "cerré la posición en GGAL"
+  "me deshice de los cedears de Tesla"
+  "liquidé el plazo fijo"
+
+CAMPOS
+- busqueda: el ticker si lo nombra, y si no el nombre del activo, tal como lo
+  dijo. "vendí mis acciones de Apple" -> "Apple". "cerré GGAL" -> "GGAL".
+  No inventes un ticker acá: el sistema busca por las dos vías.
+- fecha: cuándo la vendió, si lo dice. Sin fecha, null y se asume hoy.
+
+OJO CON LA DIFERENCIA: "vendí 5 de mis 10 acciones" NO es un cierre, porque la
+posición sigue abierta. Eso es un movimiento de tipo ingreso. Elegí
+cerrar_inversion solo cuando se deshizo de la tenencia ENTERA.
 
 ======================= SI PIDE UNA ALERTA DE PRECIO =====================
 Poné intencion="crear_alerta" y completá "alerta". El resto en null.
@@ -972,6 +999,15 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             intencion=Intencion.REGISTRAR_INVERSION,
             inversion=inversion,
             faltantes=faltantes,
+        )
+
+    if extraida.intencion is Intencion.CERRAR_INVERSION:
+        busqueda = (extraida.cierre.busqueda or "").strip() if extraida.cierre else ""
+        return Interpretacion(
+            intencion=Intencion.CERRAR_INVERSION,
+            cierre=busqueda or None,
+            cierre_fecha=(extraida.cierre.fecha if extraida.cierre else None) or hoy,
+            faltantes=() if busqueda else ("que_inversion",),
         )
 
     if extraida.intencion is Intencion.CREAR_ALERTA:
