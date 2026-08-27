@@ -1484,6 +1484,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
   [data-pantalla="inversiones"] > .bloque:not(:last-child) { grid-column: span 1; }
 
+  [data-pantalla="inversiones"] > .bloque:has(.posiciones),
+  [data-pantalla="inversiones"] > .tarjeta:has(.posiciones) { grid-column: 1 / -1; }
+
   [data-pantalla="inversiones"] > .nota-precios { grid-column: 2; }
   [data-pantalla="inversiones"]:has(> .bloque + .bloque) > .nota-precios { grid-column: 1 / -1; }
 
@@ -1528,8 +1531,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 32px;
   }
-  [data-pantalla="inversiones"] .posiciones .posicion:last-child {
-    border-bottom: 1px solid var(--borde);
+  [data-pantalla="inversiones"] .posiciones .posicion:nth-last-child(-n+2) {
+    border-bottom: 0;
   }
 
   [data-pantalla="inversiones"] .precio-svg { height: 170px; }
