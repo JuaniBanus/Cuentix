@@ -1,10 +1,4 @@
 // Pantalla Ahorros: cuánto se apartó, dónde quedó y cómo viene creciendo.
-//
-// Una decisión que la distingue del resto: la evolución NO se limita al período
-// elegido. El ahorro es un stock, no un flujo —lo que apartaste en marzo sigue
-// ahí en agosto—, así que una línea que arranca de cero cada mes no muestra
-// nada. El total y el reparto sí respetan el período, como en todas las
-// pantallas; la línea dice explícitamente que es todo el historial.
 
 import { renderDolar } from "./dolar.js";
 import { renderPatrimonio } from "./patrimonio.js";
@@ -20,8 +14,6 @@ import { engancharObjetivos, renderFormObjetivo, seccionObjetivos } from "./obje
 
 /** El equivalente en dólares del total, al oficial del día. */
 function equivalenteEnDolares(total, moneda, { cotizacion, falloCotizacion }) {
-  // Ya está en dólares, o el botón global ya los está mostrando convertidos:
-  // repetir el número abajo no agrega nada.
   if (moneda !== "ARS" || verEnDolares()) return "";
 
   if (!cotizacion) {
@@ -31,9 +23,6 @@ function equivalenteEnDolares(total, moneda, { cotizacion, falloCotizacion }) {
   }
 
   const enDolares = total / cotizacion.venta;
-  // Si la cotización quedó vieja hay que decir de cuándo es, pero la fecha
-  // viene de una API de terceros: si no se puede leer, se avisa igual sin ella
-  // en vez de escribir "Invalid Date" en pantalla.
   const cuando = new Date(cotizacion.fecha);
   const aviso = cotizacion.vencida
     ? ` · no pude actualizarla${
@@ -68,28 +57,14 @@ function barrasPorCuenta(lugares, moneda) {
 
 export function renderAhorros(contenedor, ctx) {
   const { movimientos, historialAhorros, moneda, monedas, periodo, setMoneda, objetivos } = ctx;
-  // El patrimonio va al final de esta pantalla y se dibuja después de que la
-  // vista principal escribió su innerHTML, porque si no lo borraría.
   const alFinal = () => {
     renderRetos(contenedor, { retos: ctx.retos, moneda, hoy: ctx.hoy });
 
-    // El dólar vive acá y no en Gastos: quien mira esta pantalla está viendo
-    // en qué guarda la plata, y en Argentina esa pregunta y la del tipo de
-    // cambio son la misma. En Gastos era información suelta al pie.
-    //
-    // No depende de los movimientos del usuario, así que se dibuja aunque no
-    // haya nada cargado: sirve desde el día uno.
     renderDolar(contenedor, {
       datos: ctx.dolar,
       casaAbierta: ctx.casaDolar,
       setCasa: ctx.setCasaDolar,
     });
-    // Va acá, entre el dólar y el patrimonio, siguiendo la misma lectura: en qué
-    // moneda conviene estar, dónde poner los pesos que quedan, y recién después
-    // cuánto se tiene en total.
-    //
-    // Como el dólar, no depende de los movimientos del usuario: se dibuja
-    // aunque no haya nada cargado, porque sirve desde el día uno.
     renderRendimientos(contenedor, { rendimientos: ctx.rendimientos ?? [], hoy: ctx.hoy });
 
     if (historialAhorros?.length || ctx.inversiones?.length) {
@@ -102,8 +77,6 @@ export function renderAhorros(contenedor, ctx) {
     }
   };
 
-  // Crear o editar ocupa la pantalla entera, como el detalle de categoría en
-  // Gastos.
   if (ctx.vistaObjetivo) {
     renderFormObjetivo(contenedor, ctx);
     return;
@@ -113,12 +86,9 @@ export function renderAhorros(contenedor, ctx) {
   const total = totalPorTipo(porMoneda(movimientos)[moneda] ?? [], "ahorro");
   const lugares = totalesPorCuenta(porMoneda(movimientos)[moneda] ?? [], "ahorro");
 
-  // Toda la historia de ahorros de esta moneda, para la línea.
   const historial = (porMoneda(historialAhorros)[moneda] ?? []).filter((m) => m.tipo === "ahorro");
   const acumulado = totalPorTipo(historial, "ahorro");
 
-  // El período que abarca el historial: del primer ahorro hasta hoy. Las fechas
-  // vienen del más reciente al más viejo, así que el primero es el último.
   const desdeElPrimero = historial.length
     ? rango(historial[historial.length - 1].fecha, historial[0].fecha)
     : null;

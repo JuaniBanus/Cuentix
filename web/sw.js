@@ -1,22 +1,4 @@
 // Service worker de Cuentix.
-//
-// Hace dos cosas: que la app se pueda instalar, y que abra aunque no haya
-// internet (con el aviso de conexión adentro, en vez del dinosaurio del
-// navegador).
-//
-// Estrategia a propósito conservadora:
-//
-//   - Lo propio (HTML, CSS, JS) va por RED PRIMERO, y el caché es el paracaídas.
-//     Al revés —caché primero— es más rápido, pero cada deploy quedaría invisible
-//     hasta que alguien se acuerde de subir la VERSION de acá abajo. En una app
-//     que todavía cambia todas las semanas, eso se paga caro.
-//   - Lo de terceros (la tipografía y el cliente de Supabase, ambos con la
-//     versión en la URL) va por CACHÉ PRIMERO: nunca cambian bajo el mismo
-//     nombre y son lo más pesado de bajar.
-//   - Supabase NO se cachea nunca. Son datos privados y con token: guardarlos
-//     en el disco del navegador sería filtrarlos.
-//
-// Subir VERSION borra el caché viejo. Hay que tocarla solo si cambia esta lista.
 
 const VERSION = "cuentix-v19";
 
@@ -107,13 +89,11 @@ async function redPrimero(pedido) {
   const cache = await caches.open(VERSION);
   try {
     const respuesta = await fetch(pedido);
-    // Solo se guarda lo que salió bien: cachear un 404 lo dejaría pegado.
     if (respuesta.ok) cache.put(pedido, respuesta.clone());
     return respuesta;
   } catch (error) {
     const guardado = await cache.match(pedido);
     if (guardado) return guardado;
-    // Navegar sin red: se devuelve el HTML y la app muestra su propio aviso.
     if (pedido.mode === "navigate") {
       const shell = await cache.match("./index.html");
       if (shell) return shell;
@@ -138,7 +118,6 @@ self.addEventListener("fetch", (evento) => {
 
   const url = new URL(pedido.url);
 
-  // Todo lo que va a Supabase pasa de largo: sin caché y sin intermediarios.
   if (url.hostname.endsWith(".supabase.co")) return;
 
   if (esDeTerceroEstable(url)) {

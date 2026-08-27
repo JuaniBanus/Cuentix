@@ -1,27 +1,13 @@
 // Línea de evolución del gasto, en SVG puro.
-//
-// Sin librería: una línea, una grilla de tres rayas y un punto son unas pocas
-// cuentas, y traer una dependencia por CDN sería más peso y una cosa más que
-// puede estar caída.
-//
-// Decisiones que vienen de la guía de visualización:
-// - Trazo de 2px, grilla de una raya sólida un tono por encima de la superficie.
-//   Nunca punteada: el punteado se lee como "proyección" cuando es solo grilla.
-// - Una sola serie, así que no lleva leyenda: el título de la tarjeta ya dice
-//   qué se está mirando.
-// - El punto tiene un anillo del color de la superficie para no confundirse con
-//   la línea que cruza.
-// - El valor no se escribe sobre cada día —serían 31 números encimados—: va uno
-//   solo arriba, que cambia al recorrer el gráfico.
 
 import { dibujarTrazo, hayQueAnimar } from "./animar.js";
 import { esc, fechaCorta, monto } from "./format.js";
 
 const ANCHO = 320;
 const ALTO = 128;
-const ARRIBA = 14;   // aire para que el punto del máximo no se corte
+const ARRIBA = 14;
 const ABAJO = 10;
-const DERECHA = 7;   // idem para el punto final
+const DERECHA = 7;
 
 /** Convierte la serie en coordenadas del viewBox. */
 function puntos(serie, maximo) {
@@ -30,7 +16,6 @@ function puntos(serie, maximo) {
 
   return serie.map((p, i) => ({
     ...p,
-    // Con un solo día no hay recta que trazar: se lo pone a la izquierda.
     x: serie.length === 1 ? 0 : (i / (serie.length - 1)) * util,
     y: ARRIBA + alto - (maximo ? (p.acumulado / maximo) * alto : 0),
   }));
@@ -44,10 +29,9 @@ export function renderLinea(contenedor, serie, { moneda, periodo }) {
 
   const maximo = serie[serie.length - 1].acumulado;
   const coords = puntos(serie, maximo);
-  let cursor = coords.length - 1; // arranca en el último día
+  let cursor = coords.length - 1;
 
   const trazo = coords.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  // El área se cierra contra la base para que el relleno no quede flotando.
   const area = `${trazo} L${coords[coords.length - 1].x.toFixed(1)} ${ALTO - ABAJO} L${coords[0].x.toFixed(1)} ${ALTO - ABAJO} Z`;
 
   const grilla = [0, 0.5, 1]
@@ -110,7 +94,6 @@ export function renderLinea(contenedor, serie, { moneda, periodo }) {
 
   svg.addEventListener("pointermove", alPuntero);
   svg.addEventListener("pointerdown", alPuntero);
-  // Al soltar vuelve al final, que es el dato que importa por defecto.
   svg.addEventListener("pointerleave", () => mostrar(coords.length - 1));
 
   svg.addEventListener("keydown", (e) => {
@@ -121,8 +104,5 @@ export function renderLinea(contenedor, serie, { moneda, periodo }) {
 
   mostrar(cursor);
 
-  // El trazo se dibuja de izquierda a derecha, que es el sentido en el que se
-  // lee el tiempo. El relleno de abajo aparece detrás con su propia animación
-  // en el CSS: si entrara junto con la línea, taparía el recorrido.
   if (hayQueAnimar()) dibujarTrazo(contenedor.querySelector(".linea-trazo"));
 }

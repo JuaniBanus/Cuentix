@@ -1,33 +1,12 @@
 // Fotos de los objetivos, en Supabase Storage.
-//
-// EL BUCKET ES PRIVADO, no público. Son fotos de cosas que la persona quiere
-// comprar —un auto, la casa, el viaje— y un bucket público las deja legibles
-// para cualquiera que adivine la URL. Con bucket privado hay que pedir una URL
-// firmada cada vez, que vence sola.
-//
-// Por eso en la base se guarda la RUTA y no la URL: una URL firmada guardada
-// sería un link roto en unas horas.
-//
-// La ruta lleva el uuid del usuario adelante (<user_id>/<objetivo>.<ext>)
-// porque las policies de Storage comparan ese primer tramo contra auth.uid().
-// Sin esa convención, cualquiera con sesión podría leer las fotos de todos.
 
 import { sb } from "./data.js";
 
 const BUCKET = "objetivos";
-// El bucket también lo limita del lado del servidor; acá se valida para poder
-// avisar antes de subir 8 MB por una conexión de celular.
 const TAMANO_MAXIMO = 5 * 1024 * 1024;
 const TIPOS = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-// Las URLs firmadas duran lo suficiente para mirar la pantalla un rato.
 const VIGENCIA_FIRMA = 60 * 60;
 
-// Ruta -> {url, vence}. Una URL firmada ANDA SIN SESIÓN: ese es el punto de
-// que esté firmada. O sea que lo que queda acá adentro sigue sirviendo para
-// bajar la imagen aunque el usuario cierre sesión, hasta que venza la hora.
-//
-// Por eso este caché se vacía en el logout (ver `olvidarFirmas`), y no alcanza
-// con que lo haga `reiniciarEstado`: esto no vive en el estado.
 const _cacheFirmas = new Map();
 
 /** Revisa el archivo antes de subirlo. Devuelve el problema, o null. */
@@ -40,13 +19,7 @@ export function revisar(archivo) {
   return null;
 }
 
-/**
- * Sube la foto y devuelve su ruta dentro del bucket.
- *
- * El nombre del archivo lleva el id del objetivo y un sufijo temporal: sin el
- * sufijo, reemplazar la foto dejaría la anterior cacheada en el navegador y se
- * seguiría viendo la vieja.
- */
+/** Sube la foto y devuelve su ruta dentro del bucket. */
 export async function subir(archivo, objetivoId) {
   const problema = revisar(archivo);
   if (problema) throw new Error(problema);
@@ -64,7 +37,6 @@ export async function subir(archivo, objetivoId) {
   });
 
   if (error) {
-    // El caso más probable con RLS mal aplicado es un 403 sin detalle útil.
     throw new Error(
       /policy|not authorized|row-level/i.test(error.message ?? "")
         ? "No pude guardar la imagen: falta correr la migración del bucket."
@@ -80,8 +52,6 @@ export async function url(ruta) {
   if (!ruta) return null;
 
   const guardada = _cacheFirmas.get(ruta);
-  // Se renueva antes de que venza, no cuando ya venció: si no, la imagen se
-  // rompe justo mientras alguien la está mirando.
   if (guardada && Date.now() < guardada.vence - 60_000) return guardada.url;
 
   const { data, error } = await sb.storage
@@ -97,12 +67,7 @@ export async function url(ruta) {
   return data.signedUrl;
 }
 
-/**
- * Tira las URLs firmadas que haya en memoria. Se llama al cerrar sesión.
- *
- * No borra ninguna foto: solo deja de tener a mano links que todavía funcionan
- * y que son del usuario que se acaba de ir.
- */
+/** Tira las URLs firmadas que haya en memoria. Se llama al cerrar sesión. */
 export function olvidarFirmas() {
   _cacheFirmas.clear();
 }
@@ -114,7 +79,5 @@ export async function borrar(ruta) {
   try {
     await sb.storage.from(BUCKET).remove([ruta]);
   } catch {
-    // Un archivo suelto en el bucket no rompe nada y no vale la pena
-    // frenarle al usuario el guardado por esto.
   }
 }

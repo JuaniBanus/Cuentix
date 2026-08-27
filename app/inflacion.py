@@ -1,31 +1,4 @@
-"""Inflación personal: cuánto subió la canasta propia del usuario.
-
-CÓMO SE ARMA, Y POR QUÉ ASÍ
-
-Por ítem: se compara la primera observación contra la última y se saca la tasa
-mensual equivalente de forma GEOMÉTRICA. Un 20% en cuatro meses no es 5% por
-mes, es 4,66%; dividir infla el número y el error crece con el plazo.
-
-El índice general es el promedio de esas tasas PONDERADO POR LO QUE PESA CADA
-ÍTEM EN EL GASTO del período base. Es como se arma un IPC de verdad: que el
-alquiler suba 10% no es lo mismo que suba 10% el café, aunque ambos sean "un
-ítem que aumentó 10%". Un promedio simple los trataría igual.
-
-QUÉ ENTRA Y QUÉ NO
-Solo los ítems comparables (ver app/items.py): servicios, donde el total es el
-precio, y compras con precio unitario capturado. Las compras variables —súper,
-comida— quedan afuera del índice y se informan aparte como GASTO, porque su
-total mezcla precio con cantidad y no hay forma de separarlos.
-
-Un ítem necesita al menos dos observaciones en MESES distintos. Dos compras
-del mismo día no dicen nada sobre la evolución de un precio.
-
-LO QUE ESTE NÚMERO NO ES
-No es el IPC. Es la canasta de una sola persona, con los ítems que cargó, en
-las fechas que cargó. Con pocos ítems es muy sensible: un alquiler que ajusta
-una vez al año puede dominar el índice del mes en que ajusta. Por eso siempre
-viaja con cuántos ítems lo sostienen.
-"""
+"""Inflación personal: cuánto subió la canasta propia del usuario."""
 
 from __future__ import annotations
 
@@ -37,11 +10,8 @@ from app.items import ClaseItem, clase_de
 
 logger = logging.getLogger(__name__)
 
-# Menos que esto y comparar dos precios es leer ruido.
 MESES_MINIMOS = Decimal("0.8")
-# Variaciones más extremas que esto casi siempre son otro ítem mal agrupado, o
-# una carga distinta del mismo. Se excluyen del índice y se avisa.
-VARIACION_ABSURDA = Decimal("10")  # +900% o -90%
+VARIACION_ABSURDA = Decimal("10")
 
 
 class Observacion:
@@ -74,8 +44,6 @@ class ItemMedido:
         self.precio_inicial, self.precio_final = primera.precio, ultima.precio
         self.unitario = primera.es_unitario
 
-        # Cuánto pesa el ítem: lo que se gastó en él en todo el período. Es el
-        # ponderador del índice.
         self.peso = sum((o.monto_gastado for o in obs), Decimal("0"))
 
         self.variacion = (
@@ -104,7 +72,6 @@ class Termometro:
     def __init__(self) -> None:
         self.tem: Decimal | None = None
         self.items: list[ItemMedido] = []
-        # Ítems que se repiten pero no se pueden medir, con el motivo.
         self.descartados: list[tuple[str, str]] = []
         self.desde: date | None = None
         self.hasta: date | None = None
@@ -125,11 +92,7 @@ def _precio_de(fila: dict) -> tuple[Decimal, bool] | None:
 
 
 def calcular(filas: list[dict]) -> Termometro:
-    """Arma el termómetro a partir de movimientos ya filtrados a gastos.
-
-    Espera filas con: fecha, monto, categoria, clave_item y, opcionalmente,
-    precio_unitario. Las que no tengan clave_item se ignoran.
-    """
+    """Arma el termómetro a partir de movimientos ya filtrados a gastos."""
     termometro = Termometro()
 
     por_item: dict[str, list[Observacion]] = {}
@@ -204,23 +167,12 @@ def calcular(filas: list[dict]) -> Termometro:
     return termometro
 
 
-# --------------------------------------------------------------------------
-# Detección de saltos, para el aviso del bot
-# --------------------------------------------------------------------------
-
-# Mínimo de compras previas para poder hablar de "lo que venía saliendo".
 OBSERVACIONES_MINIMAS = 3
-# Salto a partir del cual vale la pena decir algo.
 SALTO_MINIMO = Decimal("0.15")
 
 
 def detectar_salto(precio_nuevo: Decimal, previos: list[Decimal]) -> Decimal | None:
-    """Cuánto se despegó el precio nuevo de lo habitual, o None.
-
-    Se compara contra la MEDIANA de los precios previos y no contra el último:
-    un mes raro no puede convertir al siguiente en una falsa alarma, ni tapar
-    un aumento real.
-    """
+    """Cuánto se despegó el precio nuevo de lo habitual, o None."""
     if len(previos) < OBSERVACIONES_MINIMAS:
         return None
 

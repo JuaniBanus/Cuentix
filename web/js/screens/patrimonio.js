@@ -1,21 +1,8 @@
 // Sección "Patrimonio en dólares", dentro de Ahorros.
-//
-// Cada mes se valúa a la cotización que tenía ESE mes, no a la de hoy: la
-// serie del dólar oficial está publicada día a día desde 2011, así que no hace
-// falta guardar snapshots ni conformarse con una valuación aproximada.
-//
-// El contraste entre las dos curvas es el punto de la sección. En pesos el
-// patrimonio casi siempre sube —la moneda se achica— y eso solo no dice si se
-// avanzó. En dólares se ve si se ahorró de verdad o si se corrió para quedarse
-// en el mismo lugar.
 
 import { esc, monto, montosOcultos } from "../format.js";
 import { calcular, variacion } from "../patrimonio.js";
 
-// Línea propia y no `renderLinea` de linea.js: esa dibuja la serie DIARIA del
-// período y espera puntos con `.acumulado`. Acá los puntos son mensuales y de
-// toda la historia. Forzarla obligaría a hacerla genérica para dos usos que no
-// se parecen, y quedaría peor para los dos.
 const ANCHO = 320;
 const ALTO = 120;
 const MARGEN = 8;
@@ -24,8 +11,6 @@ function grafico(puntos, valorDe, formato) {
   const valores = puntos.map(valorDe);
   const max = Math.max(...valores);
   const min = Math.min(...valores);
-  // Si todos los puntos valen lo mismo, el rango sería 0 y la división
-  // rompería: se dibuja plano a media altura.
   const rango = max - min || 1;
 
   const coords = puntos.map((p, i) => ({
@@ -89,8 +74,6 @@ export function renderPatrimonio(contenedor, { ahorros, inversiones, moneda, ser
   const v = variacion(puntos);
   const ultimo = puntos[puntos.length - 1];
 
-  // El contraste entre las dos variaciones es lo que se quiere mostrar. Si
-  // van en direcciones opuestas, se dice explícitamente.
   let lectura = "";
   if (v?.enDolares !== null && v?.enDolares !== undefined) {
     if (v.enPesos > 0 && v.enDolares < 0) {
@@ -144,8 +127,6 @@ export function renderPatrimonio(contenedor, { ahorros, inversiones, moneda, ser
 
   contenedor.append(seccion);
 
-  // La línea va en dólares: es la que responde "¿avancé?". Los pesos ya están
-  // arriba en número, y las dos en la misma escala no entrarían.
   const nodo = seccion.querySelector("#linea-patrimonio");
   const conDolar = puntos.filter((p) => p.usd !== null);
 

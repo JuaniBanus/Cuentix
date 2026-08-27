@@ -1,6 +1,4 @@
 // Gastos, Ahorros e Inversiones son la misma pantalla con otro tipo: total del
-// período, reparto por categoría y el detalle. Una sola implementación evita
-// que las tres se vayan separando sin querer.
 
 import { porMoneda, totalesPorCategoria, totalPorTipo } from "../cuentas.js";
 import { esc, monto } from "../format.js";
@@ -15,9 +13,6 @@ function barras(categorias, moneda) {
     </ul>`;
 }
 
-/**
- * @param {{tipo: string, titulo: string, etiquetaTotal: string, vacio: string}} pantalla
- */
 export function pantallaPorTipo({ tipo, titulo, etiquetaTotal, vacio }) {
   return function render(contenedor, { movimientos, moneda, monedas, setMoneda, periodo }) {
     const deLaMoneda = porMoneda(movimientos)[moneda] ?? [];

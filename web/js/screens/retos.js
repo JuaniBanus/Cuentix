@@ -1,9 +1,4 @@
 // Retos de ahorro: el activo y los logros, dentro de Ahorros.
-//
-// La web solo LEE. Los retos los propone, acepta y cierra el bot por Telegram,
-// que es donde el usuario está cuando registra un gasto y donde tiene sentido
-// avisarle en el momento en que lo rompe. Un botón "aceptar reto" acá abriría
-// un segundo camino para lo mismo y habría que mantener los dos.
 
 import { esc, monto } from "../format.js";
 

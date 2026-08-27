@@ -1,25 +1,4 @@
-"""Retos de ahorro: micro-desafíos sacados de los propios hábitos.
-
-CÓMO SE ELIGE QUÉ PROPONER
-No hay una lista de retos genéricos. La propuesta sale de lo que la persona
-efectivamente gasta: se miran sus categorías de los últimos meses y se elige
-una que sea FRECUENTE (aparece la mayoría de las semanas) y PRESCINDIBLE.
-
-La segunda condición es la delicada. Proponer "una semana sin alquiler" es
-absurdo, y "una semana sin remedios" es peor que absurdo. Hay una lista de
-categorías que nunca se proponen, y ante la duda no se propone nada: un reto
-tonto quema la función entera.
-
-EL AHORRO ES UNA ESTIMACIÓN
-"Ahorrás ~$15.000" sale de lo que gastó en ese rubro en semanas comparables.
-No es una promesa, y el texto lo dice con el ~ y con la palabra "estimado".
-
-CELEBRAR SIN EMPALAGAR
-Al cumplirlo se felicita, y ahí sí corresponde: el usuario se propuso algo y
-lo hizo. Pero al fallarlo NO se reta ni se consuela con condescendencia; se
-informa el resultado y se ofrece seguir. Nadie quiere que una app le diga
-"no pasa nada, la próxima será" cuando gastó $3.000 en un café.
-"""
+"""Retos de ahorro: micro-desafíos sacados de los propios hábitos."""
 
 from __future__ import annotations
 
@@ -30,19 +9,14 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
-# Categorías que NUNCA se proponen para un reto. Proponer no gastar en salud o
-# en el alquiler no es un desafío, es un mal consejo.
 _INTOCABLES = frozenset({
     "salud", "medicamentos", "farmacia", "alquiler", "expensas", "servicios",
     "luz", "gas", "agua", "internet", "impuestos", "educacion", "colegio",
     "prepaga", "obra social", "seguro", "transporte", "supermercado",
 })
 
-# Semanas de historia que se miran para estimar el ahorro.
 SEMANAS_HISTORIA = 8
-# Mínimo de apariciones para considerar que el rubro es un hábito.
 APARICIONES_MINIMAS = 3
-# Debajo de esto el reto no vale la pena proponerlo.
 AHORRO_MINIMO = Decimal("1000")
 
 DURACION_DIAS = 7
@@ -66,7 +40,6 @@ def proponer(filas: list[dict], moneda: str, hoy: date | None = None) -> Propues
     hoy = hoy or date.today()
     desde = hoy - timedelta(days=SEMANAS_HISTORIA * 7)
 
-    # (categoría) -> {semana: total}
     por_categoria: dict[str, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
 
     for fila in filas:
@@ -90,10 +63,8 @@ def proponer(filas: list[dict], moneda: str, hoy: date | None = None) -> Propues
     for categoria, semanas in por_categoria.items():
         apariciones = len(semanas)
         if apariciones < APARICIONES_MINIMAS:
-            continue  # no es un hábito, es una vez que pasó
+            continue
 
-        # El ahorro estimado es lo que gasta en una semana TÍPICA, no el
-        # promedio: una semana con un gasto raro no puede inflar la promesa.
         totales = sorted(semanas.values())
         medio = len(totales) // 2
         tipico = (
@@ -111,12 +82,7 @@ def proponer(filas: list[dict], moneda: str, hoy: date | None = None) -> Propues
 
 
 def revisar(reto: dict, gastado: Decimal, hoy: date | None = None) -> str | None:
-    """El nuevo estado del reto, o None si sigue abierto.
-
-    Se cierra por gasto (falló apenas se pasa) o por fecha (cumplió al
-    terminar sin haberse pasado). Cerrar apenas falla y no al final es
-    deliberado: enterarte el domingo de que lo perdiste el lunes no sirve.
-    """
+    """El nuevo estado del reto, o None si sigue abierto."""
     hoy = hoy or date.today()
 
     try:
@@ -135,11 +101,6 @@ def revisar(reto: dict, gastado: Decimal, hoy: date | None = None) -> str | None
         return "fallido"
 
     return "cumplido" if hoy > hasta else None
-
-
-# --------------------------------------------------------------------------
-# Textos
-# --------------------------------------------------------------------------
 
 
 def texto_propuesta(propuesta: Propuesta, formatear_monto, moneda) -> str:

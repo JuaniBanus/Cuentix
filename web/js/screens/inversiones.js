@@ -1,15 +1,4 @@
 // Pantalla Inversiones: valor del portafolio, distribución y posiciones.
-//
-// Regla que ordena todo el archivo: si no hay precio de mercado, NO se inventa.
-// Hoy solo la cripto tiene precio (CoinGecko). El resto se muestra valuado a
-// su costo, marcado, y queda FUERA del cálculo de ganancia: meterlo con G/P
-// cero diría "no ganaste ni perdiste", que es una afirmación falsa, no un dato
-// ausente.
-//
-// A diferencia del resto de las pantallas, esta no mira el período: las
-// tenencias son un stock. Una acción comprada hace dos años sigue en la cartera
-// este mes, así que acotarla por fecha mostraría un portafolio vacío en cuanto
-// no se compre nada.
 
 import { renderAviso } from "../aviso.js";
 import { renderDona } from "../donut.js";
@@ -45,22 +34,7 @@ function cantidad(valor) {
   return valor.toLocaleString("es-AR", { maximumFractionDigits: 8 });
 }
 
-/**
- * Calcula el estado de cada posición.
- *
- * El precio sale de una de tres fuentes, en este orden:
- *
- *   1. CRIPTO -> CoinGecko, que la web consulta directo.
- *   2. RESTO  -> el proxy del bot, en el mercado que corresponde a la moneda
- *      de la tenencia. Una posición en pesos se valúa contra BYMA y una en
- *      dólares contra NASDAQ: AAPL existe en los dos y son activos distintos.
- *   3. Si ninguna respondió, el ÚLTIMO PRECIO CONOCIDO guardado localmente,
- *      marcado con su fecha.
- *
- * `valuada` dice si el valor actual sale de un precio real —de cualquiera de
- * las tres— o es el costo repetido. Solo lo valuado entra en la ganancia:
- * contar una posición sin precio como 0% de G/P afirmaría que no se movió.
- */
+/** Calcula el estado de cada posición. */
 function evaluar(inversiones, precios, preciosMercado) {
   return inversiones.map((inv) => {
     const costo = inv.cantidad * inv.precio_compra;
@@ -79,7 +53,6 @@ function evaluar(inversiones, precios, preciosMercado) {
       if (Number.isFinite(p?.precio)) [precioActual, origen] = [p.precio, "mercado"];
     }
 
-    // Nada en vivo: se recurre a lo último que supimos, si lo supimos.
     if (precioActual === null && ticker) {
       const previo = ultimoConocido(ticker, mercado);
       if (previo) {
@@ -107,21 +80,10 @@ function evaluar(inversiones, precios, preciosMercado) {
 
 /** Reparto por sector, con lo que no lo tenga agrupado aparte. */
 function porSector(posiciones) {
-  // El sector lo guarda el bot cuando el mensaje lo menciona; el proxy de
-  // precios no lo provee. Así que hay tenencias sin sector, y van juntas en un
-  // grupo propio en vez de repartirse o desaparecer del total.
   return agrupar(posiciones, (p) => (p.sector || "").trim() || "Sin sector");
 }
 
-/**
- * Reparto porcentual por alguna clave, con TODO llevado a USD.
- *
- * La conversión no es un lujo acá: sumar 620.000 ARS con 32.582 USD como si
- * valieran lo mismo daría "95% en pesos", que no describe ninguna realidad.
- * Una distribución exige una unidad común; sin cotizaciones no se dibuja.
- *
- * @returns {Array<{categoria, total, porcentaje}>|null} null si falta alguna tasa.
- */
+/** Reparto porcentual por alguna clave, con TODO llevado a USD. */
 function agrupar(posiciones, clave) {
   const mapa = new Map();
 
@@ -156,17 +118,11 @@ function filaPosicion(p) {
          sin cotización
        </span>`;
 
-  // Un precio guardado no es el de ahora, y decirlo importa: es la diferencia
-  // entre "vale esto" y "la última vez que pude mirar valía esto".
   const marcaVieja =
     p.origen === "guardado"
       ? `<span class="posicion-sub posicion-vieja">último precio conocido · ${fechaDeMomento(p.desde)}</span>`
       : "";
 
-  // El histórico sale del proxy, así que solo se ofrece para lo que el proxy
-  // cubre. La cripto queda afuera a propósito: su precio viene de CoinGecko,
-  // que acá se consulta sin serie histórica. Un botón que lleva a un error es
-  // peor que no tener botón.
   const graficable = Boolean(p.ticker) && vaPorElProxy(p.tipo);
   const etiqueta = `${p.ticker || p.nombre}, ver histórico`;
 
@@ -192,12 +148,7 @@ function filaPosicion(p) {
     </li>`;
 }
 
-/**
- * Tarjeta del gráfico histórico del activo abierto.
- *
- * Vive en el estado y no adentro de la pantalla porque cada toque del ojo
- * redibuja todo, y una variable local se perdería con el gráfico abierto.
- */
+/** Tarjeta del gráfico histórico del activo abierto. */
 function bloqueHistorico(historico) {
   const { ticker, cargando, error, puntos, moneda } = historico;
 
@@ -237,9 +188,6 @@ export function renderInversiones(contenedor, ctx) {
     historico, verHistorico,
   } = ctx;
 
-  // No pudimos leer la cartera: se dice, con el mismo aviso y botón de
-  // reintentar que el resto de la app. Una lista vacía acá afirmaría que no
-  // hay tenencias, que es distinto de no haberlas podido leer.
   if (errorInversiones) {
     renderAviso(contenedor, {
       mensaje: errorInversiones.message,
@@ -249,8 +197,6 @@ export function renderInversiones(contenedor, ctx) {
     return;
   }
 
-  // null = todavía no llegó la consulta. [] = llegó y no hay tenencias. Sin la
-  // distinción, la primera pintada diría "no cargaste nada" antes de saberlo.
   if (!inversiones) {
     contenedor.innerHTML = esqueletoInversiones();
     return;
@@ -265,8 +211,6 @@ export function renderInversiones(contenedor, ctx) {
 
   const posiciones = evaluar(inversiones, precios, preciosMercado);
 
-  // Los totales van por moneda: una cartera en USD y otra en ARS no se suman,
-  // igual que en el resto de la app.
   const monedas = [...new Set(posiciones.map((p) => p.moneda))].sort();
 
   const resumen = monedas.map((m) => {
@@ -275,9 +219,6 @@ export function renderInversiones(contenedor, ctx) {
     return {
       moneda: m,
       valorActual: deLaMoneda.reduce((t, p) => t + p.valorActual, 0),
-      // La ganancia se calcula SOLO sobre lo que tiene precio real. El % usa
-      // ese mismo costo como base, no el de toda la cartera: si no, un 10% de
-      // suba en la única cripto se diluiría contra acciones sin valuar.
       costoValorado: valoradas.reduce((t, p) => t + p.costo, 0),
       ganancia: valoradas.reduce((t, p) => t + p.ganancia, 0),
       cuantasValoradas: valoradas.length,
@@ -295,8 +236,6 @@ export function renderInversiones(contenedor, ctx) {
     avisos.push(`Sin cobertura del proveedor: ${esc(sinCoberturaMercado.join(", "))}`);
   }
 
-  // Las que se muestran con un precio guardado se cuentan aparte de las que no
-  // tienen precio: son situaciones distintas y la salida también.
   const conPrecioViejo = posiciones.filter((p) => p.origen === "guardado").length;
   if (conPrecioViejo) {
     avisos.push(
@@ -368,8 +307,6 @@ export function renderInversiones(contenedor, ctx) {
   const SIN_TASAS = `<p class="vacio">No pude traer las cotizaciones, y sin una
     moneda común el reparto porcentual no significaría nada.</p>`;
 
-  // La dona ya sabe repartir colores, mostrar leyenda y respetar el ojo:
-  // reusarla mantiene idéntico el lenguaje visual con la pantalla de Inicio.
   const porTipo = agrupar(posiciones, (p) => ETIQUETA_TIPO[p.tipo] ?? p.tipo);
   const nodoDona = contenedor.querySelector("#dona-tipo");
   if (porTipo) {
@@ -383,11 +320,6 @@ export function renderInversiones(contenedor, ctx) {
     nodoDona.innerHTML = SIN_TASAS;
   }
 
-  // Por moneda va en barras y no en otra dona: son dos o tres categorías y
-  // una segunda dona en la misma pantalla se lee como si midiera lo mismo.
-  //
-  // Usa `celdasDeBarra`, la misma que Gastos y Ahorros: la barra por moneda no
-  // tiene por qué verse distinta de las demás por estar en otra pantalla.
   const porMoneda = agrupar(posiciones, (p) => p.moneda);
   contenedor.querySelector("#barras-moneda").innerHTML = porMoneda
     ? `<ul class="barras">
@@ -402,8 +334,6 @@ export function renderInversiones(contenedor, ctx) {
   if (!sectores) {
     nodoSector.innerHTML = SIN_TASAS;
   } else if (sectores.length === 1 && sectores[0].categoria === "Sin sector") {
-    // Repartir 100% en "Sin sector" no es una distribución, es un cartel raro.
-    // Se dice qué falta y cómo se completa.
     nodoSector.innerHTML = `<p class="vacio">Ninguna tenencia tiene sector cargado.
       El proveedor de precios no lo informa, así que sale de lo que le contás al
       bot: «compré 10 CEDEARs de Apple a US$25, tecnología».</p>`;

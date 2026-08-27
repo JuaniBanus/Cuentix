@@ -1,14 +1,7 @@
 // El aviso que se muestra cuando algo no se pudo traer.
-//
-// Es una tarjeta y no un alert() ni un texto suelto: la app sigue entera abajo,
-// se explica qué pasó y hay un botón para volver a intentar sin recargar.
 
 import { esc } from "./format.js";
 
-/**
- * @param {HTMLElement} contenedor
- * @param {{mensaje: string, esDeConexion?: boolean, onReintentar?: () => void}} aviso
- */
 export function renderAviso(contenedor, { mensaje, esDeConexion = false, onReintentar }) {
   contenedor.innerHTML = `
     <section class="aviso" role="alert">

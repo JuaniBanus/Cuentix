@@ -1,30 +1,4 @@
-"""Ejecuta un PlanConsulta y redacta la respuesta en castellano.
-
-POR QUÉ ESTO EXISTE Y NO "QUE GEMINI ESCRIBA LA CONSULTA"
-
-La tentación es pedirle SQL al modelo y ejecutarlo. Es más corto de escribir y
-mucho peor:
-
-- Un modelo que emite SQL puede emitir `delete`, `update`, un `union` contra
-  otra tabla o un `pg_sleep`. Aunque el 99,9% de las veces genere un `select`
-  inocente, la superficie de ataque es "todo lo que Postgres entiende", y quien
-  escribe el texto de entrada es cualquiera que le escriba al bot.
-- Una consulta mal armada no falla ruidosamente: devuelve un número. El usuario
-  lee "gastaste $84.000" sin forma de saber que se contaron también los ahorros.
-- Con service_role, que saltea RLS, un SQL suelto puede leer filas de otro
-  usuario.
-
-Acá el modelo NO produce consulta: produce un PlanConsulta, que es un objeto
-con campos tipados y enums cerrados. La traducción de plan a consulta la hace
-este archivo, con un repertorio fijo. Lo que no está previsto, no se puede
-pedir; y si el modelo devuelve algo fuera del vocabulario, Pydantic lo rechaza
-antes de que toque la base.
-
-Las agregaciones se hacen en Python sobre las filas ya filtradas. A escala de
-finanzas personales el costo es nulo, se mantiene la exactitud con Decimal, y
-—lo importante— no hay ningún punto donde un texto del usuario se convierta en
-parte de una consulta.
-"""
+"""Ejecuta un PlanConsulta y redacta la respuesta en castellano."""
 
 from __future__ import annotations
 
@@ -46,7 +20,6 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
-# Techo de grupos que se muestran, por encima del que pida el plan.
 TOPE_GRUPOS = 12
 
 _DIAS = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
@@ -112,9 +85,6 @@ class Resultado:
     """Lo que devuelve ejecutar un plan, ya listo para redactar."""
 
     def __init__(self) -> None:
-        # (moneda, etiqueta) -> Grupo. La moneda SIEMPRE separa: sumar pesos
-        # con dólares daría un número sin significado, igual que en el resto
-        # de la app.
         self.grupos: dict[Moneda, list[Grupo]] = {}
         self.filas = 0
 
@@ -141,12 +111,7 @@ def _clave(fila: dict, dimension: Dimension, cuando: date) -> str:
 def ejecutar(
     plan: PlanConsulta, periodo: Periodo | None = None, *, user_id: str
 ) -> Resultado:
-    """Corre el plan sobre un período y devuelve los grupos calculados.
-
-    `user_id` es de quién es la pregunta. Va como parámetro y no como algo que
-    este módulo pueda averiguar solo, para que no exista ninguna forma de pedir
-    un análisis sin decir sobre los datos de quién.
-    """
+    """Corre el plan sobre un período y devuelve los grupos calculados."""
     ventana = periodo or plan.periodo
 
     filas = movimientos_para_analisis(
@@ -159,8 +124,6 @@ def ejecutar(
         comercio=plan.comercio,
     )
 
-    # El día de la semana no se puede filtrar en PostgREST sin una función en
-    # la base, así que se filtra acá. Es el único filtro que no viaja al motor.
     dias_pedidos = {d.value for d in plan.dias_semana}
 
     resultado = Resultado()
@@ -192,11 +155,6 @@ def ejecutar(
     return resultado
 
 
-# --------------------------------------------------------------------------
-# Redacción
-# --------------------------------------------------------------------------
-
-
 def _sujeto(plan: PlanConsulta) -> str:
     """"tus gastos", "lo que cobraste", "tus movimientos"."""
     if plan.tipo is None:
@@ -211,7 +169,6 @@ def _detalle_filtros(plan: PlanConsulta) -> str:
     if plan.comercio:
         partes.append(f"que mencionan «{plan.comercio}»")
     if plan.dias_semana:
-        # En plural: "los sábados y domingos", no "los sábado y domingo".
         nombres = [
             _DIAS_LINDOS[_DIAS.index(d.value)] + ("" if d.value.endswith("s") else "s")
             for d in plan.dias_semana
@@ -221,8 +178,7 @@ def _detalle_filtros(plan: PlanConsulta) -> str:
 
 
 def _periodo_en_texto(periodo: Periodo) -> str:
-    """"en total" es el default cuando la pregunta no acota el tiempo, y
-    repetirlo suena raro ("...que mencionan «starbucks» en total")."""
+    """"en total" es el default cuando la pregunta no acota el tiempo, y"""
     return "" if periodo.etiqueta == "en total" else f" {periodo.etiqueta}"
 
 
@@ -247,11 +203,7 @@ def redactar(
     formatear_monto,
     comparacion: Resultado | None = None,
 ) -> str:
-    """Arma el texto de la respuesta.
-
-    `formatear_monto(monto, moneda)` lo inyecta main.py para no duplicar el
-    formato argentino ni la lógica del ojo.
-    """
+    """Arma el texto de la respuesta."""
     periodo = _periodo_en_texto(plan.periodo)
 
     if not resultado.grupos:
@@ -262,8 +214,6 @@ def redactar(
     lineas.append(f"{encabezado}{periodo}:")
 
     tope = min(plan.limite, TOPE_GRUPOS)
-    # Con dos monedas en juego y agrupado, las etiquetas se repiten ("sin
-    # cuenta" para pesos y para dólares) y sin encabezado no se sabe cuál es cuál.
     marcar_moneda = len(resultado.grupos) > 1 and plan.agrupar_por is not Dimension.NINGUNA
 
     for moneda in sorted(resultado.grupos, key=lambda m: m.value):
@@ -312,12 +262,7 @@ def _texto_valor(plan: PlanConsulta, grupo: Grupo, moneda: Moneda, fmt) -> str:
 def _texto_comparacion(
     plan: PlanConsulta, actual: Resultado, previo: Resultado, fmt
 ) -> str:
-    """La comparación entre dos períodos, moneda por moneda.
-
-    Son dos ejecuciones del mismo plan sobre ventanas distintas y una resta.
-    No hay subconsulta ni SQL: eso es lo que hace que agregar comparativas no
-    amplíe en nada la superficie de lo que se puede pedir.
-    """
+    """La comparación entre dos períodos, moneda por moneda."""
     lineas = [f"Contra {previo_etiqueta(plan)}:"]
 
     monedas = sorted(set(actual.grupos) | set(previo.grupos), key=lambda m: m.value)

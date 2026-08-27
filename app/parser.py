@@ -1,13 +1,4 @@
-"""Interpretación de texto libre con Gemini.
-
-Un mismo mensaje puede ser dos cosas distintas: un registro ("me gasté 8 lucas
-en el super") o una pregunta ("¿cuánto gasté este mes?"). `interpretar_mensaje`
-resuelve ambas en UNA sola llamada: el modelo devuelve la intención y, según
-cuál sea, el movimiento a guardar o los filtros de la consulta.
-
-Una sola llamada y no dos (clasificar → extraer) porque cuesta y tarda la
-mitad, y porque el modelo decide la intención viendo el mensaje completo.
-"""
+"""Interpretación de texto libre con Gemini."""
 
 from __future__ import annotations
 
@@ -46,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 MODELO = "gemini-3.5-flash-lite"
 
-# Cliente único a nivel módulo: reutiliza la conexión HTTP entre mensajes.
 _cliente = genai.Client(api_key=GEMINI_API_KEY)
 
 
@@ -54,21 +44,6 @@ class ParserError(RuntimeError):
     """No se pudo interpretar el texto."""
 
 
-# Los tres modelos siguientes son el esquema que le pedimos a Gemini. Son
-# distintos de los de models.py a propósito:
-#
-# 1. El tipo Schema de la API de Gemini no acepta restricciones numéricas
-#    (`gt` / `exclusiveMinimum`) ni el `anyOf` que Pydantic genera para
-#    `Decimal`. Acá usamos `float` sin restricciones, y la validación fuerte
-#    (monto > 0, decimales, longitudes) la aplica `Movimiento` al construir
-#    el objeto final.
-# 2. `descripcion` sí está, y es a propósito: antes guardábamos el mensaje
-#    literal del usuario, y esa frase quedaba en la base para siempre sin que
-#    nada la leyera. Ahora el modelo devuelve una etiqueta corta, que es la
-#    parte útil sin arrastrar cómo lo escribió.
-#
-# Ojo: el docstring de una clase viajaría a la API como `description` del
-# schema, por eso las notas van como comentario.
 class _MovimientoExtraido(BaseModel):
     fecha: date
     tipo: TipoMovimiento
@@ -76,21 +51,11 @@ class _MovimientoExtraido(BaseModel):
     moneda: Moneda = Moneda.ARS
     categoria: str
     descripcion: str
-    # Opcional de verdad: el modelo tiene que poder no contestarla. Si fuera
-    # `str` con default "", el schema la pediría igual y el modelo llenaría el
-    # hueco con lo primero que le suene.
     cuenta: str | None = None
-    # DÓNDE se compró ("coto", "shell", "edesur"). Se separa de la descripción
-    # porque es lo que identifica una compra repetida en el tiempo.
     comercio: str | None = None
-    # Cuánto y de qué, cuando el usuario lo dice: "20 litros", "2 kg". Con
-    # esto se puede sacar el precio por unidad, que es lo único que permite
-    # medir inflación en una compra variable.
     cantidad: float | None = None
     unidad: str | None = None
     precio_unitario: float | None = None
-    # PARA QUÉ se aparta la plata, cuando el usuario nombra una meta. No es una
-    # columna: es el texto con el que después se busca el objetivo.
     objetivo: str | None = None
 
 
@@ -103,8 +68,6 @@ class _ConsultaExtraida(BaseModel):
     etiqueta_periodo: str | None = None
 
 
-# Todo opcional salvo el tipo: una compra mal contada ("compré bitcoin") tiene
-# que poder volver con los huecos marcados, para preguntar en vez de inventar.
 class _InversionExtraida(BaseModel):
     tipo: TipoInversion | None = None
     ticker: str | None = None
@@ -123,11 +86,6 @@ class _AlertaExtraida(BaseModel):
     umbral: float | None = None
 
 
-# Un ítem de una lista de varios movimientos. TODO opcional, incluso lo que en
-# `_MovimientoExtraido` es obligatorio: en "gasté 5 lucas en el súper y 2 en un
-# café", el "2" puede ser 2.000 o 2 pesos y no hay forma de saberlo. El ítem
-# tiene que poder volver incompleto y con la duda escrita, para preguntar por
-# ese solo sin frenar a los demás.
 class _MovimientoItem(BaseModel):
     fecha: date | None = None
     tipo: TipoMovimiento | None = None
@@ -136,11 +94,7 @@ class _MovimientoItem(BaseModel):
     categoria: str | None = None
     descripcion: str | None = None
     cuenta: str | None = None
-    # El pedazo del mensaje del que salió este ítem, para poder citarlo al
-    # preguntar. Sin esto, "no entendí el segundo" no le dice nada a nadie.
     fragmento: str | None = None
-    # Qué quedó sin resolver, en una frase corta y en segunda persona. null si
-    # el ítem está completo.
     duda: str | None = None
 
 
@@ -150,9 +104,6 @@ class _PeriodoExtraido(BaseModel):
     etiqueta: str | None = None
 
 
-# El vocabulario de las preguntas libres. Cada campo es un enum cerrado o un
-# valor de filtro: el modelo no puede nombrar una columna ni escribir una
-# condición. Lo que no esté acá, no se puede pedir.
 class _PlanExtraido(BaseModel):
     agregacion: Agregacion | None = None
     base_promedio: BasePromedio | None = None
@@ -177,12 +128,10 @@ class _CompraExtraida(BaseModel):
 class _FinanciacionExtraida(BaseModel):
     cuotas: int | None = None
     monto_cuota: float | None = None
-    # Alternativa a monto_cuota: el total financiado, del que se deduce la cuota.
     total_financiado: float | None = None
     precio_contado: float | None = None
     moneda: Moneda | None = None
     que: str | None = None
-    # Porcentaje mensual dicho por el usuario ("gano 4% por mes" -> 4).
     tasa_mensual_pct: float | None = None
 
 
@@ -203,24 +152,15 @@ class Interpretacion(NamedTuple):
 
     intencion: Intencion
     movimiento: Movimiento | None = None
-    # Los ítems de un mensaje con varios movimientos que quedaron completos.
     movimientos: list[Movimiento] = ()
-    # Los que no: (fragmento citado, qué falta preguntar).
     dudas: tuple[tuple[str, str], ...] = ()
     plan: PlanConsulta | None = None
-    # Una compra que el usuario está pensando. No se guarda: se analiza.
     compra: CompraHipotetica | None = None
-    # Cuotas contra contado. Tampoco se guarda: se compara.
     financiacion: Financiacion | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
     alerta: Alerta | None = None
-    # A qué objetivo dijo el usuario que va el ahorro, con sus palabras. Viaja
-    # aparte del Movimiento porque no es un dato de la tabla: es la pista para
-    # buscar el objetivo, y puede no encontrar ninguno.
     objetivo: str | None = None
-    # Campos que la compra necesita y el mensaje no traía. Si tiene algo,
-    # `inversion` viene en None y hay que preguntar en vez de guardar.
     faltantes: tuple[str, ...] = ()
 
 
@@ -230,7 +170,6 @@ _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domin
 def _instruccion_sistema(hoy: date) -> str:
     """Prompt de sistema. Recibe la fecha para resolver referencias relativas."""
     ayer = hoy - timedelta(days=1)
-    # `strftime('%A')` devolvería el día en inglés según el locale del proceso.
     dia = _DIAS[hoy.weekday()]
     inicio_mes = hoy.replace(day=1)
     return f"""\
@@ -620,8 +559,6 @@ Poné intencion="desconocida" con los dos objetos en null. Usalo para saludos,
 charla suelta o mensajes que no se entienden. No fuerces un registro."""
 
 
-# Lo que un modelo escribe cuando le pedimos null y contesta con palabras.
-# Cualquiera de estas es un "no lo dijo", no el nombre de una cuenta.
 _CUENTA_VACIA = frozenset(
     {
         "null",
@@ -646,13 +583,7 @@ _CUENTA_VACIA = frozenset(
 
 
 def _normalizar_cuenta(valor: str | None) -> str | None:
-    """Deja la cuenta lista para guardar, o None si no hay nada que guardar.
-
-    El prompt pide null cuando el usuario no dice dónde, pero un modelo a veces
-    contesta "no especificado" en vez de un null de verdad. Eso entraría a la
-    base como si fuera una cuenta más y ensuciaría cualquier agrupación futura,
-    así que se filtra acá.
-    """
+    """Deja la cuenta lista para guardar, o None si no hay nada que guardar."""
     limpio = " ".join((valor or "").split()).lower()[:40].strip()
     if not limpio or limpio in _CUENTA_VACIA:
         return None
@@ -660,14 +591,7 @@ def _normalizar_cuenta(valor: str | None) -> str | None:
 
 
 def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
-    """Convierte la salida de Gemini en el Movimiento definitivo.
-
-    No recibe el mensaje del usuario a propósito: la etiqueta la genera el
-    modelo y el texto original no sale nunca de `interpretar_mensaje`.
-
-    `Decimal(str(...))` y no `Decimal(float)`: convertir el float directo
-    arrastraría la basura binaria (0.1 -> 0.1000000000000000055...).
-    """
+    """Convierte la salida de Gemini en el Movimiento definitivo."""
     try:
         monto = Decimal(str(extraido.monto)).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError) as exc:
@@ -675,10 +599,6 @@ def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
 
     categoria = extraido.categoria.strip().lower()
 
-    # El prompt pide 2 a 5 palabras, pero es un pedido y no una garantía: si el
-    # modelo se pasa de largo, recortamos en vez de dejar que Movimiento lance
-    # ValidationError, porque eso costaría el movimiento entero. El split/join
-    # colapsa saltos de línea y espacios repetidos.
     descripcion = " ".join(extraido.descripcion.split()).lower()[:60].strip()
 
     try:
@@ -688,19 +608,14 @@ def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
             monto=monto,
             moneda=extraido.moneda,
             categoria=categoria,
-            # Si el modelo la devuelve vacía, la categoría es un detalle pobre
-            # pero válido: mejor eso que perder el movimiento por un campo
-            # que no se muestra en ninguna respuesta.
             descripcion=descripcion or categoria,
             cuenta=_normalizar_cuenta(extraido.cuenta),
             **_datos_de_precio(extraido, monto),
         )
     except ValidationError as exc:
-        # Típicamente: monto <= 0 o categoria vacía.
         raise ParserError(f"Gemini devolvió un movimiento inválido: {exc.errors()}") from exc
 
 
-# Nombre técnico -> cómo pedírselo al usuario.
 _ETIQUETA_FALTANTE = {
     "tipo": "qué tipo de activo es (acción, cedear, cripto, bono, fci, plazo fijo)",
     "nombre": "qué compraste",
@@ -710,12 +625,7 @@ _ETIQUETA_FALTANTE = {
 
 
 def _datos_de_precio(extraido, monto: Decimal) -> dict:
-    """Comercio, cantidad, unidad y precio unitario, ya normalizados.
-
-    Si vino la cantidad pero no el precio por unidad, se divide: es la cuenta
-    que el usuario no hizo pero cuyos dos términos sí dio. Al revés no se
-    multiplica, porque el total ya lo tenemos y sería redundarlo.
-    """
+    """Comercio, cantidad, unidad y precio unitario, ya normalizados."""
     comercio = " ".join((getattr(extraido, "comercio", None) or "").split()).lower()[:60]
     unidad = " ".join((getattr(extraido, "unidad", None) or "").split()).lower()[:20]
 
@@ -751,14 +661,7 @@ def _datos_de_precio(extraido, monto: Decimal) -> dict:
 
 
 def _decimal_limpio(valor: float) -> Decimal:
-    """float -> Decimal sin ceros de relleno ni basura binaria.
-
-    `Decimal(str(...))` y no `Decimal(float)`, que arrastraría la cola binaria
-    a una columna de 8 decimales. El normalize saca los ceros sobrantes
-    (10.0 -> 10) y el quantize deshace la notación científica que normalize
-    produce con los enteros (10 -> 1E+1), que Postgres no debería tener que
-    interpretar.
-    """
+    """float -> Decimal sin ceros de relleno ni basura binaria."""
     numero = Decimal(str(valor)).normalize()
     if numero == numero.to_integral_value():
         return numero.quantize(Decimal(1))
@@ -768,12 +671,7 @@ def _decimal_limpio(valor: float) -> Decimal:
 def _a_inversion(
     extraida: _InversionExtraida | None, hoy: date
 ) -> tuple[Inversion | None, tuple[str, ...]]:
-    """Arma la Inversion, o devuelve qué falta para poder armarla.
-
-    Devuelve (inversion, faltantes). Si `faltantes` tiene algo, `inversion` es
-    None: preferimos preguntar antes que guardar una tenencia a medias, que
-    después arruinaría todos los cálculos de ganancia.
-    """
+    """Arma la Inversion, o devuelve qué falta para poder armarla."""
     if extraida is None:
         return None, ("tipo", "nombre", "cantidad", "precio_compra")
 
@@ -782,8 +680,6 @@ def _a_inversion(
         for campo in ("tipo", "nombre", "cantidad", "precio_compra")
         if getattr(extraida, campo) is None
     ]
-    # Un precio de 0 solo tiene sentido en un plazo fijo o un airdrop; para el
-    # resto es casi siempre el modelo rellenando un hueco.
     if (
         extraida.precio_compra == 0
         and extraida.tipo is not TipoInversion.PLAZO_FIJO
@@ -824,8 +720,6 @@ def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[st
     ticker = (extraida.ticker or "").strip().upper().replace(" ", "")
     if not ticker:
         faltantes.append("ticker")
-    # El umbral en 0 o negativo no es un umbral: el modelo pudo haber mandado
-    # el signo de la dirección, que acá lo aporta el tipo.
     if extraida.umbral is None or extraida.umbral <= 0:
         faltantes.append("umbral")
     if extraida.tipo is None:
@@ -850,12 +744,7 @@ def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[st
 def _a_movimientos(
     items: list[_MovimientoItem] | None, hoy: date
 ) -> tuple[list[Movimiento], tuple[tuple[str, str], ...]]:
-    """Separa los ítems completos de los que hay que preguntar.
-
-    Devuelve (movimientos, dudas). Un ítem sin monto usable, o que el modelo
-    marcó con `duda`, no se guarda: se cita para preguntar por él solo. Los
-    demás siguen su camino, que es todo el punto de esta función.
-    """
+    """Separa los ítems completos de los que hay que preguntar."""
     completos: list[Movimiento] = []
     dudas: list[tuple[str, str]] = []
 
@@ -888,8 +777,6 @@ def _a_movimientos(
                 )
             )
         except (ValidationError, InvalidOperation, ValueError) as exc:
-            # Un ítem que no valida no tira abajo el mensaje entero: se
-            # convierte en una pregunta más.
             logger.info("Ítem inválido en un mensaje múltiple: %s", exc)
             dudas.append((cita, "no me quedó claro, ¿me lo repetís?"))
 
@@ -899,17 +786,12 @@ def _a_movimientos(
 def _a_financiacion(
     extraida: _FinanciacionExtraida | None,
 ) -> tuple[Financiacion | None, tuple[str, ...]]:
-    """(financiacion, faltantes). Con faltantes, la financiación es None.
-
-    Se prefiere preguntar antes que suponer: dar por hecho que "sin interés"
-    significa que el contado vale lo mismo cambiaría la respuesta entera.
-    """
+    """(financiacion, faltantes). Con faltantes, la financiación es None."""
     if extraida is None:
         return None, ("cuotas", "monto_cuota", "precio_contado")
 
     cuotas = extraida.cuotas if (extraida.cuotas or 0) > 0 else None
 
-    # La cuota puede venir directa o deducirse del total financiado.
     monto_cuota = extraida.monto_cuota
     if (monto_cuota is None or monto_cuota <= 0) and extraida.total_financiado and cuotas:
         monto_cuota = extraida.total_financiado / cuotas
@@ -930,9 +812,6 @@ def _a_financiacion(
     if extraida.tasa_mensual_pct is not None:
         try:
             candidata = _decimal_limpio(extraida.tasa_mensual_pct) / 100
-            # 0 < tasa < 1 (es decir, menos de 100% mensual). Fuera de ahí, se
-            # descarta y se usa la del mercado: es más probable un error de
-            # lectura que alguien ganando 200% por mes.
             if Decimal("0") < candidata < Decimal("1"):
                 tasa = candidata
         except (InvalidOperation, ValueError):
@@ -975,20 +854,14 @@ def _a_periodo(extraido: _PeriodoExtraido | None, por_defecto: str) -> Periodo:
     if extraido is None:
         return Periodo(etiqueta=por_defecto)
     desde, hasta = extraido.desde, extraido.hasta
-    if desde and hasta and desde > hasta:  # el modelo los dio al revés
+    if desde and hasta and desde > hasta:
         desde, hasta = hasta, desde
     etiqueta = (extraido.etiqueta or "").strip().lower() or por_defecto
     return Periodo(desde=desde, hasta=hasta, etiqueta=etiqueta[:40])
 
 
 def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
-    """Convierte lo que devolvió el modelo en un plan validado.
-
-    Todo lo que llega se pasa por Pydantic, que rechaza cualquier valor fuera
-    de los enums. Si el modelo inventara una dimensión o una agregación, acá
-    se cae y la pregunta se responde con "no entendí", que es infinitamente
-    mejor que ejecutar algo que nadie previó.
-    """
+    """Convierte lo que devolvió el modelo en un plan validado."""
     if extraido is None:
         return PlanConsulta()
 
@@ -1000,7 +873,6 @@ def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
         moneda=extraido.moneda,
         categoria=(extraido.categoria or "").strip().lower()[:60] or None,
         comercio=(extraido.comercio or "").strip().lower()[:60] or None,
-        # dict.fromkeys y no set: preserva el orden en que los nombró.
         dias_semana=tuple(dict.fromkeys(extraido.dias_semana or ())),
         periodo=_a_periodo(extraido.periodo, "en total"),
         comparar_con=(
@@ -1008,8 +880,6 @@ def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
             if extraido.comparar_con
             else None
         ),
-        # El clamp es del modelo: un limite=500 no puede volverse un mensaje
-        # de 500 renglones en Telegram.
         limite=min(max(extraido.limite or 8, 1), 50),
     )
 
@@ -1023,7 +893,7 @@ def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     categoria = (extraida.categoria or "").strip().lower() or None
 
     desde, hasta = extraida.desde, extraida.hasta
-    if desde and hasta and desde > hasta:  # el modelo los dio al revés
+    if desde and hasta and desde > hasta:
         desde, hasta = hasta, desde
 
     return Consulta(
@@ -1037,17 +907,7 @@ def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
 
 
 def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
-    """Decide si el mensaje es un registro o una consulta, y extrae sus datos.
-
-    Args:
-        texto: el mensaje tal cual lo escribió el usuario.
-        hoy: fecha de referencia para las expresiones relativas. Por defecto,
-            la fecha actual; se puede fijar para tests reproducibles.
-
-    Raises:
-        ParserError: si el texto está vacío, si la API falla o si la respuesta
-            no llega a ser utilizable. Siempre con un mensaje legible.
-    """
+    """Decide si el mensaje es un registro o una consulta, y extrae sus datos."""
     texto = (texto or "").strip()
     if not texto:
         raise ParserError("El mensaje está vacío, no hay nada que hacer.")
@@ -1062,11 +922,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
                 system_instruction=_instruccion_sistema(hoy),
                 response_mime_type="application/json",
                 response_schema=_InterpretacionExtraida,
-                temperature=0,  # extracción determinista, no queremos creatividad
-                # El modelo razona por defecto; para esta tarea no aporta y
-                # agrega latencia y costo en cada mensaje del bot.
-                # Los Gemini 3.x usan thinking_level: pasarles el thinking_budget
-                # de la generación 2.5 devuelve 400 INVALID_ARGUMENT.
+                temperature=0,
                 thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
         )
@@ -1076,28 +932,24 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             f"No pude contactar al servicio de interpretación (error {exc.code}). "
             "Probá de nuevo en un momento."
         ) from exc
-    except Exception as exc:  # red caída, DNS, timeout, etc.
+    except Exception as exc:
         logger.exception("Error inesperado llamando a Gemini")
         raise ParserError("No pude contactar al servicio de interpretación.") from exc
 
     extraida = respuesta.parsed
     if extraida is None:
-        # Pasa si el modelo cortó por filtros de seguridad o devolvió JSON roto.
         crudo = (respuesta.text or "").strip()
         logger.warning("Gemini no devolvió un objeto parseable. Crudo: %r", crudo[:500])
         raise ParserError("No entendí el mensaje.")
 
     if extraida.intencion is Intencion.REGISTRAR:
         if extraida.movimiento is None:
-            # Dijo "registrar" pero no mandó los datos: tratamos como no entendido.
             logger.warning("Intención registrar sin movimiento para %r", texto)
             raise ParserError("Dijo registrar pero no extrajo el movimiento.")
         mencion = " ".join((extraida.movimiento.objetivo or "").split()).strip()
         return Interpretacion(
             intencion=Intencion.REGISTRAR,
             movimiento=_a_movimiento(extraida.movimiento),
-            # Solo tiene sentido para los ahorros; en el resto se descarta
-            # aunque el modelo la haya completado.
             objetivo=mencion or None
             if extraida.movimiento.tipo is TipoMovimiento.AHORRO
             else None,
@@ -1106,8 +958,6 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
     if extraida.intencion is Intencion.REGISTRAR_VARIOS:
         movimientos, dudas = _a_movimientos(extraida.movimientos, hoy)
         if not movimientos and not dudas:
-            # Dijo "varios" y no mandó ninguno: no hay nada que guardar ni
-            # nada que preguntar, así que es lo mismo que no haber entendido.
             logger.warning("Intención registrar_varios sin ítems para %r", texto)
             raise ParserError("Dijo varios movimientos pero no extrajo ninguno.")
         return Interpretacion(
@@ -1144,8 +994,6 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
     if extraida.intencion is Intencion.SIMULAR_COMPRA:
         compra = _a_compra(extraida.compra)
         if compra is None:
-            # Sin monto no hay nada que analizar. Mejor "no entendí" que un
-            # análisis sobre un número inventado.
             logger.info("simular_compra sin monto usable para %r", texto)
             return Interpretacion(intencion=Intencion.DESCONOCIDA)
         return Interpretacion(intencion=Intencion.SIMULAR_COMPRA, compra=compra)
@@ -1166,15 +1014,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
 
 
 def parsear_movimiento(texto: str, hoy: date | None = None) -> Movimiento:
-    """Interpreta el texto exigiendo que sea un registro.
-
-    Se mantiene por comodidad y para los tests: es `interpretar_mensaje`
-    cuando ya sabés que el mensaje es un movimiento.
-
-    Raises:
-        ParserError: además de los casos de `interpretar_mensaje`, si el
-            mensaje resultó ser una consulta y no un registro.
-    """
+    """Interpreta el texto exigiendo que sea un registro."""
     resultado = interpretar_mensaje(texto, hoy)
     if resultado.movimiento is None:
         raise ParserError(

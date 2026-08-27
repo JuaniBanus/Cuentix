@@ -1,23 +1,4 @@
-"""Narrativa mensual: el resumen en prosa de cómo fue el mes.
-
-Mismo criterio de privacidad que app/insights.py, y por el mismo motivo: a
-Gemini viajan NÚMEROS YA CALCULADOS, nunca movimientos crudos ni las
-descripciones que escribió el usuario. Un total por categoría no identifica a
-nadie; "pizza con Marina el viernes" sí. Los agregados los arma el navegador,
-que es donde ya están los datos, y acá solo se los redacta.
-
-EL TONO
-Cálido, rioplatense, en segunda persona. Y sobre todo: NO moralista. Es la
-misma regla que el asesor de compras y por la misma razón —un resumen que
-reta se deja de leer al segundo mes— pero acá hay un riesgo extra: la prosa
-invita a opinar mucho más que una lista de números. Por eso el prompt prohíbe
-explícitamente felicitar, retar y aconsejar, y pide describir.
-
-LO QUE NO PUEDE HACER
-Inventar cifras. Si un dato no está en los agregados, no existe: no se estima,
-no se redondea "más o menos" y no se completa con lo que suene bien. Un número
-inventado dentro de un texto que suena confiado es peor que no tener el texto.
-"""
+"""Narrativa mensual: el resumen en prosa de cómo fue el mes."""
 
 from __future__ import annotations
 
@@ -35,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 MODELO = "gemini-3.5-flash-lite"
 
-# Suficiente para tres o cuatro párrafos. Más que eso deja de leerse.
 LARGO_MAXIMO = 1400
 
 _cliente = genai.Client(api_key=GEMINI_API_KEY)
@@ -48,7 +28,6 @@ class NarrativaError(RuntimeError):
 class CategoriaMes(BaseModel):
     nombre: str = Field(max_length=60)
     total: Decimal
-    # Contra el promedio propio del usuario, en porcentaje. None = sin historia.
     variacion_vs_promedio_pct: float | None = None
 
 
@@ -68,7 +47,6 @@ class AgregadosMes(BaseModel):
     total_ingresado: Decimal | None = None
     total_ahorrado: Decimal | None = None
 
-    # Contra el propio promedio del usuario, nunca contra otras personas.
     gasto_promedio_meses_previos: Decimal | None = None
     meses_de_historia: int = 0
     tasa_ahorro_pct: float | None = None
@@ -77,9 +55,7 @@ class AgregadosMes(BaseModel):
     categorias: list[CategoriaMes] = Field(default_factory=list, max_length=12)
     objetivos: list[ObjetivoMes] = Field(default_factory=list, max_length=6)
 
-    # Del termómetro, si se pudo calcular.
     inflacion_personal_pct: float | None = None
-    # Cargos recurrentes detectados y cuánto pesan por mes.
     recurrentes_total: Decimal | None = None
     recurrentes_cantidad: int = 0
 
@@ -188,10 +164,7 @@ def generar(datos: AgregadosMes) -> str:
             contents=_datos_para_el_modelo(datos),
             config=types.GenerateContentConfig(
                 system_instruction=_INSTRUCCION,
-                # Sin response_schema: acá se quiere prosa, no un objeto. Es la
-                # diferencia con el resto del parser, donde la estructura es lo
-                # que importa.
-                temperature=0.4,  # algo de aire para que no suene a plantilla
+                temperature=0.4,
                 max_output_tokens=600,
                 thinking_config=types.ThinkingConfig(thinking_level="minimal"),
             ),
@@ -209,8 +182,6 @@ def generar(datos: AgregadosMes) -> str:
     if not texto:
         raise NarrativaError("El resumen salió vacío.")
 
-    # Recorte duro: el prompt pide 200 palabras, pero es un pedido y no una
-    # garantía. Se corta en el último punto para no dejar la frase colgada.
     if len(texto) > LARGO_MAXIMO:
         recortado = texto[:LARGO_MAXIMO]
         corte = recortado.rfind(".")

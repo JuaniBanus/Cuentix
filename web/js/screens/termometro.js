@@ -1,17 +1,4 @@
 // Termómetro de inflación personal, dentro de la pantalla de Gastos.
-//
-// Mira TODO el historial y no el período elegido, y lo dice: comparar precios
-// necesita meses, y un selector de mes arriba haría pensar que el número se
-// refiere a ese mes.
-//
-// La sección separa dos cosas que se confunden todo el tiempo:
-//
-//   PRECIOS  — servicios y compras con precio unitario. Acá "subió 30%"
-//              significa que subió el precio. Es la inflación personal.
-//   GASTO    — súper, comida, ropa. Acá "subió 30%" puede ser que compraste
-//              más. Se muestra, pero NUNCA como inflación.
-//
-// Mezclarlas daría un número que parece serio y no lo es.
 
 import { esc, monto, montosOcultos } from "../format.js";
 import { calcular, gastoPorCategoria } from "../termometro.js";
@@ -52,12 +39,7 @@ function filaItem(item, moneda) {
     </li>`;
 }
 
-/**
- * Dibuja la sección y la agrega al contenedor.
- *
- * @param {HTMLElement} contenedor
- * @param {{historial: Array, moneda: string, inflacionOficial: number|null}} ctx
- */
+/** Dibuja la sección y la agrega al contenedor. */
 export function renderTermometro(contenedor, { historial, moneda, inflacionOficial = null }) {
   const seccion = document.createElement("section");
   seccion.className = "tarjeta termo";
@@ -66,7 +48,6 @@ export function renderTermometro(contenedor, { historial, moneda, inflacionOfici
   const resultado = calcular(delaMoneda);
   const variables = gastoPorCategoria(delaMoneda);
 
-  // Sin nada que medir, se explica QUÉ falta en vez de mostrar un cero.
   if (resultado.tem === null) {
     const pendientes = resultado.descartados.slice(0, 4);
     seccion.innerHTML = `

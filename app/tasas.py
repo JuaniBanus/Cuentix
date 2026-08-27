@@ -1,22 +1,4 @@
-"""Tasas de referencia para comparar cuotas contra contado.
-
-De dónde salen y por qué esas:
-
-- PLAZO FIJO (api.argentinadatos.com): es el costo de oportunidad concreto de
-  gastar la plata hoy. Si no la usás para pagar al contado, esto es lo que
-  rinde sin riesgo ni gestión. Se toma la TNA más alta publicada, porque es la
-  que cualquiera puede conseguir buscando un rato.
-
-- INFLACIÓN (misma fuente, serie del INDEC): NO se usa para decidir, se usa
-  para dar contexto. La confusión es común y vale aclararla: para elegir entre
-  dos formas de pagar LO MISMO, lo que importa es cuánto rinde la plata que no
-  gastás, no cuánto sube el nivel general de precios. La inflación entra en la
-  decisión indirectamente, porque es la que empuja las tasas.
-
-Las dos son gratuitas y sin clave. Si alguna no responde, se usa un valor de
-respaldo y el mensaje al usuario lo dice: preferimos contestar con un número
-viejo y avisarlo antes que no contestar.
-"""
+"""Tasas de referencia para comparar cuotas contra contado."""
 
 from __future__ import annotations
 
@@ -32,10 +14,8 @@ URL_PLAZO_FIJO = "https://api.argentinadatos.com/v1/finanzas/tasas/plazoFijo"
 URL_INFLACION = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
 
 TIEMPO_LIMITE = 8.0
-VIGENCIA_CACHE = 6 * 60 * 60  # las tasas se mueven de a días, no de a minutos
+VIGENCIA_CACHE = 6 * 60 * 60
 
-# Respaldos, por si las dos APIs están caídas. Son órdenes de magnitud
-# plausibles, no valores vigentes, y por eso el texto avisa cuando se usan.
 TEM_RESPALDO = Decimal("0.015")
 INFLACION_RESPALDO = Decimal("0.020")
 
@@ -54,11 +34,9 @@ class Tasas:
         fuente_tasa: str,
         estimadas: bool,
     ) -> None:
-        # Tasa efectiva MENSUAL de lo que rinde la plata sin riesgo.
         self.tem_inversion = tem_inversion
         self.inflacion_mensual = inflacion_mensual
         self.fuente_tasa = fuente_tasa
-        # True = no se pudo consultar y son valores de respaldo.
         self.estimadas = estimadas
 
 
@@ -87,8 +65,6 @@ def _mejor_plazo_fijo() -> tuple[Decimal, str] | None:
             tna = Decimal(str(crudo))
         except (InvalidOperation, ValueError):
             continue
-        # La API publica la TNA como fracción (0.19 = 19%). Si algún día
-        # cambiara a porcentaje, un 19 se leería como 1900% anual: se acota.
         if tna > 3:
             tna = tna / 100
         if tna > mejor_tna:
@@ -97,8 +73,6 @@ def _mejor_plazo_fijo() -> tuple[Decimal, str] | None:
     if mejor_tna <= 0:
         return None
 
-    # TNA a mensual: la TNA es nominal anual con capitalización a 30 días, así
-    # que el mes es TNA/12. No es (1+TNA)^(1/12), que sería pasar de efectiva.
     return (mejor_tna / 12).quantize(Decimal("0.00001")), banco
 
 
@@ -119,8 +93,6 @@ def _inflacion_reciente() -> Decimal | None:
 
     if not valores:
         return None
-    # Promedio simple de tres meses: alcanza para contextualizar y no se
-    # deforma con un mes suelto.
     return (sum(valores) / len(valores)).quantize(Decimal("0.00001"))
 
 

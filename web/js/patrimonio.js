@@ -1,42 +1,12 @@
 // Patrimonio neto mes a mes, en pesos y en dólares.
-//
-// SOBRE LA PREGUNTA DE CÓMO VALUAR EL HISTÓRICO
-//
-// Había dos opciones: valuar todo al dólar de hoy, o guardar la cotización de
-// cada mes en un snapshot para tener históricos reales de acá en adelante.
-// Resultó que no hace falta ninguna de las dos: argentinadatos publica la
-// serie del dólar oficial DIARIA desde 2011, gratis y con CORS. Así que cada
-// mes se valúa a la cotización que realmente tenía ese mes, incluso para
-// meses anteriores a que existiera la app.
-//
-// Eso es estrictamente mejor que guardar snapshots: no duplica una fuente de
-// verdad que ya existe, no puede desincronizarse, y funciona hacia atrás y no
-// solo hacia adelante.
-//
-// La diferencia entre las dos valuaciones no es cosmética. Con el dólar
-// pasando de 1.370 a 1.510 en cinco meses, valuar marzo al dólar de hoy diría
-// que en marzo tenías menos dólares de los que realmente tenías.
-//
-// QUÉ ES "PATRIMONIO" ACÁ
-// Ahorros acumulados + lo invertido, a costo. No incluye el saldo de la cuenta
-// ni los gastos: es lo que se apartó, que es lo que la app sabe. Las
-// inversiones van a su precio de compra y no a valor de mercado, porque el
-// valor de mercado solo está disponible para algunas y mezclar unas valuadas
-// con otras a costo daría una curva que no significa nada.
 
 const URL_SERIE = "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial";
 
 const CLAVE_CACHE = "cuentix:dolar-historico";
-const VIGENCIA_MS = 12 * 60 * 60 * 1000; // la serie crece un punto por día
+const VIGENCIA_MS = 12 * 60 * 60 * 1000;
 const TIEMPO_LIMITE_MS = 10000;
 
-/**
- * La serie del dólar oficial, como { "2026-08": 1510, ... } con el ÚLTIMO
- * valor de cada mes.
- *
- * El último y no el promedio: el patrimonio es un stock medido al cierre del
- * mes, así que corresponde el tipo de cambio de ese momento.
- */
+/** La serie del dólar oficial, como { "2026-08": 1510, ... } con el ÚLTIMO */
 export async function serieDolar() {
   const enCache = leerCache();
   if (enCache) return enCache;
@@ -53,15 +23,12 @@ export async function serieDolar() {
       const fecha = punto?.fecha;
       const venta = Number(punto?.venta);
       if (!fecha || !Number.isFinite(venta) || venta <= 0) continue;
-      // Se pisa: como la serie viene ordenada, queda el último día del mes.
       porMes[fecha.slice(0, 7)] = venta;
     }
 
     guardarCache(porMes);
     return porMes;
   } catch {
-    // Sin serie, la pantalla muestra solo los pesos y lo dice. Preferible a
-    // inventar una conversión.
     return null;
   } finally {
     clearTimeout(reloj);
@@ -83,7 +50,6 @@ function guardarCache(serie) {
   try {
     sessionStorage.setItem(CLAVE_CACHE, JSON.stringify({ momento: Date.now(), serie }));
   } catch {
-    // Sin storage se pide de nuevo. No es grave.
   }
 }
 
@@ -109,17 +75,9 @@ function sumarMes(mes, cuantos) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-/**
- * La serie de patrimonio, mes a mes y acumulada.
- *
- * @param {Array} ahorros movimientos tipo ahorro, TODA la historia
- * @param {Array} inversiones tenencias con precio_compra y fecha_compra
- * @param {string} moneda la moneda en la que están los pesos ("ARS")
- * @param {object|null} serie la del dólar; null = no se pudo traer
- * @returns {{puntos: Array, hayDolar: boolean}}
- */
+/** La serie de patrimonio, mes a mes y acumulada. */
 export function calcular(ahorros, inversiones, moneda, serie) {
-  const aportes = new Map(); // mes -> cuánto se sumó ese mes
+  const aportes = new Map();
 
   for (const m of ahorros ?? []) {
     if (m.moneda !== moneda || m.tipo !== "ahorro") continue;
@@ -142,9 +100,6 @@ export function calcular(ahorros, inversiones, moneda, serie) {
   const primero = meses[0];
   const ultimo = meses[meses.length - 1];
 
-  // Se rellenan los meses sin movimiento: el patrimonio es un stock y sigue
-  // existiendo aunque ese mes no se haya ahorrado nada. Sin esto, la línea
-  // saltearía meses y daría la impresión de que no había nada.
   const puntos = [];
   let acumulado = 0;
   for (let mes = primero; mes <= ultimo; mes = sumarMes(mes, 1)) {
@@ -154,7 +109,6 @@ export function calcular(ahorros, inversiones, moneda, serie) {
       mes,
       pesos: acumulado,
       dolar,
-      // Valuado al dólar DE ESE MES, no al de hoy.
       usd: dolar ? acumulado / dolar : null,
     });
   }
@@ -162,12 +116,7 @@ export function calcular(ahorros, inversiones, moneda, serie) {
   return { puntos, hayDolar: Boolean(serie) && puntos.some((p) => p.usd !== null) };
 }
 
-/**
- * Variación entre el primero y el último punto, en las dos monedas.
- *
- * Las dos pueden ir en direcciones opuestas, y ese contraste es justamente lo
- * que hace útil el indicador: en pesos casi siempre sube, en dólares depende.
- */
+/** Variación entre el primero y el último punto, en las dos monedas. */
 export function variacion(puntos) {
   const utiles = (puntos ?? []).filter((p) => p.pesos > 0);
   if (utiles.length < 2) return null;

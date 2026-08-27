@@ -6,16 +6,11 @@
 <meta name="theme-color" content="#0b1f23">
 <title>Cuentix</title>
 
-<!-- El tema se decide acá, en un script que bloquea el pintado, y no en un
-     módulo: los módulos corren después del primer render, así que quien eligió
-     tema claro vería un fogonazo oscuro en cada carga. Son las únicas líneas de
-     JS que no viven en js/ y el único lugar donde se repite la clave. -->
 <script>
   (function () {
     var tema;
     try { tema = localStorage.getItem("cuentix:tema"); } catch (e) {}
     if (tema !== "claro" && tema !== "oscuro") {
-      // Sin preferencia guardada, arranca como esté el sistema.
       tema = matchMedia("(prefers-color-scheme: light)").matches ? "claro" : "oscuro";
     }
     document.documentElement.dataset.tema = tema;
@@ -26,13 +21,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 
-<!-- PWA. El manifest es lo que habilita "Instalar app" en el navegador. -->
 <link rel="manifest" href="manifest.json">
-<!-- iOS ignora el manifest para el ícono de la pantalla de inicio.
-     El ?v= tiene que subir cada vez que se cambia un ícono, y en los mismos
-     números que el manifest: los PNG se sirven con caché de 7 días y el sistema
-     copia el ícono al launcher al instalar, sin volver a mirarlo nunca. Cambiar
-     el dibujo sin cambiar la URL deja el logo viejo pegado en los teléfonos. -->
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
 <link rel="icon" href="icons/icono-192.png?v=2" type="image/png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -40,8 +29,6 @@
 </head>
 <body>
 
-<!-- Íconos: sprite propio en vez de traer Phosphor por CDN. Mismo trazo de 1.5,
-     una petición menos y funciona aunque el CDN esté caído. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <g id="i-casa"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></g>
@@ -62,13 +49,10 @@
   </defs>
 </svg>
 
-<!-- Se muestra mientras se resuelve si hay sesión. Sin esto, quien ya entró ve
-     un parpadeo del login antes de que la app aparezca. -->
 <div id="vista-carga" class="carga-inicial">
   <p class="login-marca">Cuentix</p>
 </div>
 
-<!-- ------------------------------------------------------------------ Login -->
 <main id="vista-login" class="login" hidden>
   <div class="login-caja">
     <p class="login-marca">Cuentix</p>
@@ -90,9 +74,6 @@
   </div>
 </main>
 
-<!-- ------------------------------------------- Cambio obligatorio de clave -->
-<!-- Vista aparte y no un cartel encima del dashboard: mientras la contraseña
-     provisoria siga puesta no se dibuja nada de la app, igual que sin sesión. -->
 <main id="vista-password" class="login" hidden>
   <div class="login-caja">
     <p class="login-marca">Cuentix</p>
@@ -118,9 +99,6 @@
   </div>
 </main>
 
-<!-- ------------------------------------------------- Cuenta sin acceso ----- -->
-<!-- Pausada, pendiente, o sin perfil. Se dice el motivo: un dashboard en cero
-     se lee como "perdí mis datos", que es lo contrario de lo que pasó. -->
 <main id="vista-estado" class="login" hidden>
   <div class="login-caja">
     <p class="login-marca">Cuentix</p>
@@ -130,24 +108,14 @@
   </div>
 </main>
 
-<!-- -------------------------------------------------------------------- App -->
 <div id="vista-app" hidden>
   <header class="cabecera">
     <p class="marca">Cuentix</p>
     <div class="cabecera-acciones">
-      <!-- El selector vive en el encabezado y no adentro de una pantalla: el
-           período vale para las cuatro y no se pierde al cambiar de tab. -->
       <button id="btn-periodo" class="boton-periodo" aria-expanded="false" aria-controls="panel-periodo">
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-calendario"></use></svg>
         <span id="periodo-etiqueta">mes</span>
       </button>
-      <!-- Convierte lo que se muestra a dólares: los pesos al oficial y los
-           euros a la paridad del BCE. Arranca desactivado y se habilita cuando
-           llegan las cotizaciones.
-
-           El title aclara cómo se valúa, y se repite en aria-label porque los
-           lectores de pantalla no anuncian title en un botón que ya tiene
-           nombre accesible. -->
       <button id="btn-dolar" class="boton-icono es-texto" aria-pressed="false"
               aria-label="Ver todo en dólares. Los movimientos en otras monedas se valúan al tipo de cambio de hoy, no al del día en que ocurrieron."
               title="Ver todo en USD&#10;&#10;Convierte ARS y EUR al tipo de cambio de HOY.&#10;Los movimientos históricos se valúan a hoy, no al&#10;cambio del día en que ocurrieron." disabled>US$</button>
@@ -155,19 +123,12 @@
         <svg viewBox="0 0 24 24" class="icono"><use href="#i-ojo"></use></svg>
       </button>
 
-      <!-- El panel vive ADENTRO del grupo de acciones, no suelto en el
-           encabezado. En pantalla grande el grupo entero se muda al pie de la
-           barra lateral, y desde acá adentro el panel se muda con él; colgado
-           del encabezado se quedaría arriba a la derecha mientras su botón se
-           fue abajo a la izquierda. -->
       <div id="panel-periodo" class="panel" hidden></div>
     </div>
   </header>
 
   <main id="contenido" class="contenido"></main>
 
-  <!-- Los botones los dibuja router.js a partir de TABS, que es la única lista
-       de secciones que existe. -->
   <nav id="tabs" class="tabs" aria-label="Secciones"></nav>
 </div>
 

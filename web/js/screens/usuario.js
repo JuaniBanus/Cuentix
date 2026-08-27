@@ -41,8 +41,6 @@ export function renderUsuario(contenedor, { email, onSalir }) {
       </button>
     </section>`;
 
-  // Cambiar de tema no redibuja nada: el color entero sale de variables CSS, así
-  // que alcanza con poner al día el interruptor.
   const btnTema = contenedor.querySelector("#btn-tema");
   btnTema.addEventListener("click", () => {
     const esClaro = alternarTema() === "claro";

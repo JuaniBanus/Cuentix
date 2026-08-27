@@ -1,28 +1,4 @@
-"""Gastos recurrentes: qué se está pagando todos los meses sin mirarlo.
-
-Espejo en Python de web/js/recurrentes.js. Se duplica por el mismo motivo que
-el termómetro: la web lee Supabase directo y el bot no puede depender de que
-la web esté abierta, ni al revés.
-
-QUÉ CUENTA COMO RECURRENTE — tres condiciones, y las tres hacen falta:
-
-  1. Al menos 3 cargos del mismo ítem. Con dos no hay periodicidad, hay una
-     coincidencia.
-  2. Espaciados regulares: la mediana de los días entre cargos tiene que
-     parecerse a un período conocido, y ningún intervalo puede despegarse
-     mucho de ella.
-  3. Monto estable respecto de la mediana.
-
-La tercera es la que separa un gasto RECURRENTE de uno FRECUENTE. El súper
-también aparece todos los meses, pero por montos distintos: eso es un hábito,
-no un débito automático.
-
-LO QUE EL BOT HACE Y LO QUE NO
-Sugiere revisar. No cancela nada, no puede cancelar nada, y no dice que haya
-que cancelar: no sabe si el gimnasio al que no vas es un olvido o una decisión.
-Muestra hace cuánto se paga y cuánto se lleva acumulado, que es el dato que
-nadie tiene a mano, y ahí se detiene.
-"""
+"""Gastos recurrentes: qué se está pagando todos los meses sin mirarlo."""
 
 from __future__ import annotations
 
@@ -36,7 +12,6 @@ CARGOS_MINIMOS = 3
 TOLERANCIA_DIAS = Decimal("0.35")
 TOLERANCIA_MONTO = Decimal("0.25")
 
-# (nombre, días, cuántas veces por mes)
 PERIODOS = (
     ("semanal", Decimal("7"), Decimal("4.33")),
     ("quincenal", Decimal("15"), Decimal("2")),
@@ -194,8 +169,6 @@ def redactar(recurrentes: list[Recurrente], moneda, formatear_monto) -> str:
     if len(recurrentes) > 8:
         lineas.append(f"…y {len(recurrentes) - 8} más.")
 
-    # La sugerencia: los que llevan mucho tiempo cobrándose. Se los nombra y se
-    # invita a mirarlos, sin decir qué hacer.
     veteranos = [r for r in recurrentes if r.meses_activo >= 6]
     if veteranos:
         lineas.append("")

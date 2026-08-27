@@ -1,37 +1,14 @@
 // Cotizaciones del dólar: las de hoy y la serie histórica.
-//
-// POR QUÉ NO HAY TABLA EN SUPABASE
-//
-// El plan era guardar un registro diario para ir armando el histórico. No hace
-// falta: argentinadatos publica la serie DIARIA de las siete casas desde 2011,
-// gratis y con CORS. Son 30.000 registros que ya existen.
-//
-// Guardar snapshots propios sería peor por tres motivos:
-//
-//   1. Solo tendríamos los días que alguien abre la app. Un fin de semana sin
-//      entrar deja huecos en la serie, y los huecos en un gráfico de precios
-//      son exactamente lo que no se puede tener.
-//   2. Empieza desde hoy. La serie pública arranca en 2011, así que el gráfico
-//      funciona desde el primer día en vez de dentro de tres meses.
-//   3. Duplica una fuente de verdad que ya existe y que puede desincronizarse.
-//
-// Es el mismo razonamiento que en patrimonio.js, y por eso comparten proveedor.
-//
-// Las de HOY salen de dolarapi porque se actualiza durante el día; la serie
-// histórica cierra por jornada.
 
 const URL_HOY = "https://dolarapi.com/v1/dolares";
 const URL_SERIE = "https://api.argentinadatos.com/v1/cotizaciones/dolares";
 
 const CLAVE_HOY = "cuentix:dolar-hoy";
 const CLAVE_SERIE = "cuentix:dolar-serie";
-// Las de hoy se mueven durante la rueda; la serie cierra una vez por día.
 const VIGENCIA_HOY = 10 * 60 * 1000;
 const VIGENCIA_SERIE = 6 * 60 * 60 * 1000;
 const TIEMPO_LIMITE = 10000;
 
-// Nombre lindo y orden de aparición. El orden no es alfabético: arranca por
-// las dos que mira todo el mundo y deja las financieras después.
 export const CASAS = [
   { id: "oficial", nombre: "Oficial" },
   { id: "blue", nombre: "Blue" },
@@ -66,7 +43,6 @@ function guardarCache(clave, dato) {
   try {
     sessionStorage.setItem(clave, JSON.stringify({ momento: Date.now(), dato }));
   } catch {
-    // Sin storage se vuelve a pedir. No es grave.
   }
 }
 
@@ -85,14 +61,7 @@ async function conTimeout(url, clave, vigencia) {
   }
 }
 
-/**
- * Todo lo que el panel necesita.
- *
- * Nunca lanza: devuelve el error como dato. Que se caiga una API de
- * cotizaciones no puede dejar la pantalla de Gastos sin dibujarse.
- *
- * @returns {{cotizaciones, serie, error}}
- */
+/** Todo lo que el panel necesita. */
 export async function traerDolar() {
   const [hoy, historia] = await Promise.allSettled([
     conTimeout(URL_HOY, CLAVE_HOY, VIGENCIA_HOY),
@@ -107,9 +76,6 @@ export async function traerDolar() {
     };
   }
 
-  // La serie se agrupa por casa y queda ordenada por fecha. Si falla, el panel
-  // muestra igual las de hoy y avisa que no hay gráfico ni variación: media
-  // función es mejor que ninguna.
   const serie = {};
   if (historia.status === "fulfilled" && Array.isArray(historia.value)) {
     for (const punto of historia.value) {
@@ -130,8 +96,6 @@ export async function traerDolar() {
       const venta = Number(c.venta);
       const compra = Number(c.compra);
       const puntos = serie[id] ?? [];
-      // El anteúltimo punto y no el último: el último es el cierre de HOY, y
-      // comparar hoy contra hoy daría cero siempre.
       const previo = puntos.length >= 2 ? puntos[puntos.length - 2].venta : null;
 
       return {
@@ -164,12 +128,7 @@ export function brecha(cotizaciones, a, b) {
   return { valor: otro / uno - 1, base: uno, contra: otro };
 }
 
-/**
- * El análisis del día: qué se movió más y para dónde.
- *
- * Devuelve null si ninguna casa tiene variación —sin histórico no hay contra
- * qué comparar— en vez de inventar un análisis de un solo día.
- */
+/** El análisis del día: qué se movió más y para dónde. */
 export function analisis(cotizaciones) {
   const conVariacion = cotizaciones.filter((c) => c.variacion !== null);
   if (!conVariacion.length) return null;

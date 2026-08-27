@@ -1,38 +1,10 @@
-"""Límite de pedidos por cliente, en memoria del proceso.
-
-POR QUÉ SIN LIBRERÍA
-
-slowapi y compañía traen un backend de Redis o un estado global que acá no hace
-falta: el bot corre en UN solo proceso en Render, y el mismo motivo por el que
-el caché de precios vive en un diccionario —ver app/mercado.py— vale para esto.
-Una dependencia más es otra cosa que actualizar y otra superficie que auditar.
-
-QUÉ PROTEGE Y QUÉ NO
-
-Protege CUOTA, no datos. Las llamadas a Gemini y al proveedor de precios son
-finitas y compartidas: agotarlas no rompe el servidor, hace que el dueño vea
-pantallas vacías sin entender por qué. Eso es lo que se está frenando.
-
-No es un anti-DDoS. Si alguien quiere tirar el servicio abajo, el cuello de
-botella es Render, no esto. Y como el estado vive en el proceso, un reinicio
-perdona a todo el mundo: es aceptable para lo que protege.
-
-LA VENTANA ES DESLIZANTE, NO FIJA
-
-Con ventanas fijas —"N por minuto, se reinicia en el segundo 0"— alguien puede
-gastar N al final de un minuto y N al principio del siguiente: 2N pedidos en dos
-segundos. Guardar las marcas de tiempo cuesta unos bytes por cliente y elimina
-ese borde.
-"""
+"""Límite de pedidos por cliente, en memoria del proceso."""
 
 from __future__ import annotations
 
 import time
 from collections import deque
 
-# Cuántos clientes distintos se recuerdan. Sin tope, cada IP nueva agrega una
-# entrada para siempre y el diccionario se vuelve una fuga de memoria lenta,
-# que es justo uno de los hallazgos que este trabajo vino a cerrar.
 TOPE_CLIENTES = 5_000
 
 
@@ -60,20 +32,13 @@ class Limite:
         for cliente in vacios:
             del self._marcas[cliente]
 
-        # Si aun podado sigue por encima del tope, se descartan los más
-        # antiguos. Es preferible olvidar a alguien —que en el peor caso
-        # consigue un cupo nuevo— antes que crecer sin límite.
         if len(self._marcas) > TOPE_CLIENTES:
             sobran = sorted(self._marcas, key=lambda c: self._marcas[c][-1])
             for cliente in sobran[: len(self._marcas) - TOPE_CLIENTES]:
                 del self._marcas[cliente]
 
     def revisar(self, cliente: str) -> None:
-        """Anota un pedido de `cliente`.
-
-        Raises:
-            LimiteExcedido: si ya gastó su cupo en la ventana actual.
-        """
+        """Anota un pedido de `cliente`."""
         ahora = time.monotonic()
         marcas = self._marcas.setdefault(cliente, deque())
 
@@ -81,7 +46,6 @@ class Limite:
             marcas.popleft()
 
         if len(marcas) >= self.cantidad:
-            # Cuándo se libera el lugar más viejo.
             espera = max(1, int(self.ventana - (ahora - marcas[0])) + 1)
             raise LimiteExcedido(espera)
 
@@ -90,16 +54,7 @@ class Limite:
 
 
 def identificar(request) -> str:
-    """Con qué clave se cuenta a quien llama.
-
-    Se prefiere la IP que reporta el proxy de Render sobre `request.client`,
-    que detrás de un balanceador es siempre la misma para todos y haría que un
-    solo abusador consumiera el cupo de todos los demás.
-
-    X-Forwarded-For lo puede escribir cualquiera, así que esto NO sirve para
-    identificar a nadie: sirve para repartir el cupo. Quien la falsee consigue
-    cupo extra, que es exactamente lo mismo que consigue cambiando de IP.
-    """
+    """Con qué clave se cuenta a quien llama."""
     reenviada = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
     if reenviada:
         return reenviada

@@ -1,27 +1,7 @@
 # Reglas de caché para el hosting (Apache).
-#
-# EL PROBLEMA QUE RESUELVE
-#
-# Hostinger sirve por defecto todo lo estático con Cache-Control de 7 días.
-# Con eso, un deploy no se ve: el navegador sigue mostrando la copia guardada
-# y no vuelve a preguntar hasta la semana siguiente.
-#
-# El caso peor es sw.js. El service worker es el que decide qué versión ve el
-# usuario, y su estrategia es red-primero justamente para que cada deploy se
-# vea enseguida. Pero el fetch() del service worker pasa por el caché HTTP del
-# navegador: si ese caché devuelve el archivo viejo, el service worker lo toma
-# por bueno y lo vuelve a guardar. Un sw.js cacheado anula toda la estrategia
-# y deja al usuario clavado en una versión antigua, sin forma de enterarse.
-#
-# Por eso las tres puertas de entrada —el service worker, el manifest y el
-# HTML— se sirven sin caché, y el resto con revalidación.
-#
-# IfModule y no a pelo: si mod_headers no estuviera, un Header suelto tira un
-# 500 y se cae el sitio entero. Preferible quedarse sin la regla que sin web.
 
 <IfModule mod_headers.c>
 
-  # Las tres puertas de entrada. Siempre frescas.
   <FilesMatch "^(sw\.js|manifest\.json)$">
     Header set Cache-Control "no-cache, must-revalidate"
   </FilesMatch>
@@ -30,23 +10,16 @@
     Header set Cache-Control "no-cache, must-revalidate"
   </FilesMatch>
 
-  # JS y CSS: se pueden guardar, pero el navegador tiene que preguntar si
-  # cambiaron. Si no cambiaron el servidor responde 304 (sin cuerpo), así que
-  # el costo es una consulta chica y la ventaja es que un deploy se ve siempre.
   <FilesMatch "\.(js|css)$">
     Header set Cache-Control "public, max-age=0, must-revalidate"
   </FilesMatch>
 
-  # Los íconos SÍ se cachean fuerte, y está bien: su URL lleva ?v=N, así que
-  # cambiar el dibujo cambia la dirección y el caché viejo queda sin usar.
   <FilesMatch "\.(png|ico|svg|webp)$">
     Header set Cache-Control "public, max-age=604800"
   </FilesMatch>
 
 </IfModule>
 
-# Tipos MIME correctos. Si el servidor manda los .js como text/plain, el
-# navegador rechaza los módulos ES y la app no arranca.
 <IfModule mod_mime.c>
   AddType application/javascript .js
   AddType application/manifest+json .webmanifest

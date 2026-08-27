@@ -1,17 +1,4 @@
 // La narrativa mensual, al final de Inicio.
-//
-// Va al cierre y no al principio: es lectura, no consulta. Quien abre la app
-// viene a ver el balance y los últimos movimientos, y un bloque de prosa
-// arriba de todo empuja esos datos abajo del pliegue. Al final funciona como
-// lo que es —un resumen para leer si hay ganas— sin estorbar a lo que se mira
-// diez veces por día.
-//
-// Muestra el resumen del último mes CERRADO, no del actual: un resumen de un
-// mes a la mitad describiría medio mes y cambiaría cada día. Los anteriores se
-// pueden abrir desde el mismo bloque.
-//
-// Se genera a pedido y no sola: cuesta una llamada a Gemini, y arrancar la app
-// disparándola sería gastarla aunque nadie la mire.
 
 import { esc } from "../format.js";
 import { nombreDelMes } from "../narrativa.js";

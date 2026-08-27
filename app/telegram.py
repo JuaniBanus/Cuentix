@@ -1,8 +1,4 @@
-"""Cliente de la Bot API de Telegram.
-
-Dos responsabilidades: mandar mensajes salientes (`enviar_mensaje`) y leer los
-updates entrantes del webhook (`extraer_mensaje`).
-"""
+"""Cliente de la Bot API de Telegram."""
 
 from __future__ import annotations
 
@@ -17,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 API_BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# Telegram rechaza con 400 los mensajes de más de 4096 caracteres.
 LIMITE_TEXTO = 4096
 
 _cliente: httpx.AsyncClient | None = None
@@ -36,20 +31,12 @@ class MensajeEntrante(NamedTuple):
 
 
 def _ocultar_token(texto: str) -> str:
-    """El token aparece en la URL, y httpx la incluye en varias excepciones.
-
-    Sin esto, un `logger.exception` termina escribiendo el token en los logs.
-    """
+    """El token aparece en la URL, y httpx la incluye en varias excepciones."""
     return texto.replace(TELEGRAM_TOKEN, "<TOKEN>")
 
 
 def _obtener_cliente() -> httpx.AsyncClient:
-    """Cliente httpx compartido, creado perezosamente.
-
-    Se crea en el primer uso y no al importar, porque un AsyncClient debe
-    nacer dentro del event loop que lo va a usar. Reutilizarlo mantiene viva
-    la conexión TCP/TLS con Telegram entre mensajes.
-    """
+    """Cliente httpx compartido, creado perezosamente."""
     global _cliente
     if _cliente is None or _cliente.is_closed:
         _cliente = httpx.AsyncClient(
@@ -68,8 +55,7 @@ async def cerrar_cliente() -> None:
 
 
 def _partir_texto(texto: str, limite: int = LIMITE_TEXTO) -> list[str]:
-    """Parte un texto largo en varios mensajes, cortando por salto de línea
-    o espacio cuando se puede, para no partir palabras al medio."""
+    """Parte un texto largo en varios mensajes, cortando por salto de línea"""
     if len(texto) <= limite:
         return [texto]
 
@@ -80,7 +66,7 @@ def _partir_texto(texto: str, limite: int = LIMITE_TEXTO) -> list[str]:
         if corte <= 0:
             corte = restante.rfind(" ", 0, limite)
         if corte <= 0:
-            corte = limite  # una sola palabra gigante: cortamos y listo
+            corte = limite
         partes.append(restante[:corte].rstrip())
         restante = restante[corte:].lstrip()
     if restante:
@@ -89,11 +75,7 @@ def _partir_texto(texto: str, limite: int = LIMITE_TEXTO) -> list[str]:
 
 
 async def _llamar(metodo: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """POST a un método de la Bot API. Devuelve el contenido de `result`.
-
-    La Bot API responde siempre con {"ok": bool, ...}. Un `ok: false` puede
-    venir con HTTP 200, así que no alcanza con mirar el código de estado.
-    """
+    """POST a un método de la Bot API. Devuelve el contenido de `result`."""
     cliente = _obtener_cliente()
     try:
         respuesta = await cliente.post(f"/{metodo}", json=payload)
@@ -103,7 +85,7 @@ async def _llamar(metodo: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise TelegramError(
             f"No pude comunicarme con Telegram ({metodo}): {_ocultar_token(str(exc))}"
         ) from exc
-    except ValueError as exc:  # respuesta que no es JSON
+    except ValueError as exc:
         logger.exception("Telegram devolvió algo que no es JSON en %s", metodo)
         raise TelegramError(f"Respuesta ilegible de Telegram ({metodo}).") from exc
 
@@ -124,24 +106,7 @@ async def enviar_mensaje(
     responder_a: int | None = None,
     silencioso: bool = False,
 ) -> list[dict[str, Any]]:
-    """Manda un mensaje de texto al chat indicado.
-
-    Si el texto supera los 4096 caracteres se manda en varios mensajes.
-
-    Args:
-        chat_id: destinatario (viene del update).
-        texto: contenido a enviar.
-        parse_mode: "MarkdownV2" o "HTML" para formato. Ojo: con MarkdownV2 hay
-            que escapar . - ! ( ) etc., o Telegram devuelve 400.
-        responder_a: message_id al que responder, para que quede citado.
-        silencioso: envía sin sonido de notificación.
-
-    Returns:
-        La lista de mensajes creados (uno por fragmento).
-
-    Raises:
-        TelegramError: si falla la red o si la API responde ok: false.
-    """
+    """Manda un mensaje de texto al chat indicado."""
     if not texto or not texto.strip():
         raise TelegramError("No se puede enviar un mensaje vacío.")
 
@@ -152,7 +117,6 @@ async def enviar_mensaje(
             payload["parse_mode"] = parse_mode
         if silencioso:
             payload["disable_notification"] = True
-        # El "responder a" solo tiene sentido en el primer fragmento.
         if responder_a is not None and i == 0:
             payload["reply_parameters"] = {"message_id": responder_a}
 
@@ -162,15 +126,7 @@ async def enviar_mensaje(
 
 
 def extraer_mensaje(update: Any) -> MensajeEntrante | None:
-    """Saca chat_id, texto y message_id del JSON crudo de un update.
-
-    Devuelve None —sin lanzar excepciones— cuando el update no trae un mensaje
-    de texto utilizable: fotos, stickers, ubicaciones, entradas/salidas de
-    miembros, callbacks de botones, o JSON con una forma inesperada.
-
-    Acepta también `edited_message`: si el usuario corrige un mensaje mal
-    tipeado, Telegram manda ese campo en lugar de `message`.
-    """
+    """Saca chat_id, texto y message_id del JSON crudo de un update."""
     if not isinstance(update, dict):
         return None
 
@@ -178,7 +134,6 @@ def extraer_mensaje(update: Any) -> MensajeEntrante | None:
     if not isinstance(mensaje, dict):
         return None
 
-    # Una foto o un sticker llegan como "message" válido pero sin "text".
     texto = mensaje.get("text")
     if not isinstance(texto, str) or not texto.strip():
         return None
@@ -196,12 +151,7 @@ def extraer_mensaje(update: Any) -> MensajeEntrante | None:
 
 
 def extraer_chat_id(update: Any) -> int | None:
-    """chat_id de cualquier update que venga de un chat, tenga texto o no.
-
-    `extraer_mensaje` devuelve None ante una foto o un sticker, y ahí nos
-    quedamos sin saber a quién contestarle. Esto rescata el chat_id igual,
-    para poder responder "por ahora solo entiendo texto".
-    """
+    """chat_id de cualquier update que venga de un chat, tenga texto o no."""
     if not isinstance(update, dict):
         return None
 

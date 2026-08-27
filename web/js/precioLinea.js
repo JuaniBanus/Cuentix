@@ -1,13 +1,4 @@
 // Gráfico de precio histórico de un activo.
-//
-// No reusa linea.js: esa dibuja gasto ACUMULADO, que siempre crece y por eso
-// arranca su eje en cero. Un precio sube y baja, y con el eje en cero un papel
-// que se movió entre 300 y 320 se vería como una recta plana. Acá el eje se
-// ajusta al rango real de la serie, que es lo que deja ver el movimiento.
-//
-// Interactivo: al tocar o pasar el mouse, muestra el precio y la fecha de ese
-// punto. Funciona con teclado —flechas— porque un gráfico que solo responde al
-// mouse deja afuera a quien navega tabulando.
 
 import { fechaCorta, monto, montosOcultos } from "./format.js";
 
@@ -29,8 +20,6 @@ function coordenadas(puntos) {
   const valores = puntos.map((p) => p.cierre);
   const min = Math.min(...valores);
   const max = Math.max(...valores);
-  // Serie plana: sin rango, todo iría a la misma altura y una división por
-  // cero dejaría NaN en el path. Se dibuja en el medio.
   const rango = max - min || 1;
   const util = ALTO - PAD_Y * 2;
 
@@ -41,11 +30,6 @@ function coordenadas(puntos) {
   }));
 }
 
-/**
- * @param {HTMLElement} contenedor
- * @param {Array<{fecha: string, cierre: number}>} puntos  del más viejo al más nuevo
- * @param {{moneda: string}} opciones
- */
 export function renderPrecioLinea(contenedor, puntos, { moneda }) {
   if (!puntos?.length) {
     contenedor.innerHTML = `<p class="vacio">No hay histórico para este activo.</p>`;
@@ -54,7 +38,6 @@ export function renderPrecioLinea(contenedor, puntos, { moneda }) {
 
   const coords = coordenadas(puntos);
   const linea = coords.map((c, i) => `${i ? "L" : "M"} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(" ");
-  // El área bajo la curva se cierra contra el piso del viewBox.
   const area = `${linea} L ${coords[coords.length - 1].x.toFixed(1)} ${ALTO} L ${coords[0].x.toFixed(1)} ${ALTO} Z`;
 
   const primero = puntos[0].cierre;
@@ -128,7 +111,6 @@ function enganchar(contenedor, coords, moneda, inicial) {
 
   svg.addEventListener("pointermove", (e) => mostrar(indiceDesde(e.clientX)));
   svg.addEventListener("pointerleave", () => mostrar(null));
-  // pointerdown además de move: en pantalla táctil no hay "mover sin tocar".
   svg.addEventListener("pointerdown", (e) => mostrar(indiceDesde(e.clientX)));
 
   svg.addEventListener("keydown", (e) => {

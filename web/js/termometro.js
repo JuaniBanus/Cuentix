@@ -1,21 +1,5 @@
 // Inflación personal: cuánto subió la canasta propia.
-//
-// Es el espejo en JavaScript de app/inflacion.py. Se duplica el cálculo a
-// propósito y no se expone un endpoint: la web ya lee los movimientos directo
-// de Supabase, así que pedirle el número al bot sumaría una llamada de red,
-// una dependencia con Render dormido y un motivo más para que la pantalla
-// quede en blanco. El precio de la duplicación es mantener dos versiones de la
-// misma regla; está acotado porque la regla es corta y no cambia seguido.
-//
-// LO QUE ENTRA AL ÍNDICE
-// Solo lo comparable: servicios, donde el total ES el precio, y compras con
-// precio unitario capturado. El súper y la comida quedan afuera —su total
-// mezcla precio con cantidad— y se muestran aparte como gasto.
-//
-// Un ítem necesita dos compras en MESES distintos. Dos del mismo día no dicen
-// nada sobre la evolución de un precio.
 
-// Categorías donde el total del movimiento es el precio del servicio.
 const CATEGORIAS_SERVICIO = new Set([
   "servicios", "alquiler", "expensas", "internet", "telefono", "celular",
   "luz", "gas", "agua", "cable", "streaming", "gimnasio", "prepaga",
@@ -23,7 +7,6 @@ const CATEGORIAS_SERVICIO = new Set([
 ]);
 
 const MESES_MINIMOS = 0.8;
-// Más que esto casi siempre es otro ítem mal agrupado, no un aumento.
 const VARIACION_ABSURDA = 10;
 
 function sinTildes(texto) {
@@ -42,11 +25,7 @@ function precioDe(fila) {
   return Number.isFinite(monto) && monto > 0 ? { precio: monto, unitario: false } : null;
 }
 
-/**
- * Calcula el termómetro a partir de los gastos con clave_item.
- *
- * @returns {{tem: number|null, items: Array, descartados: Array, desde, hasta}}
- */
+/** Calcula el termómetro a partir de los gastos con clave_item. */
 export function calcular(movimientos) {
   const porItem = new Map();
 
@@ -107,9 +86,7 @@ export function calcular(movimientos) {
       precioInicial: primera.precio,
       precioFinal: ultima.precio,
       variacion,
-      // Geométrica: un 20% en cuatro meses es 4,66% mensual, no 5%.
       tem: (ultima.precio / primera.precio) ** (1 / cantidadMeses) - 1,
-      // El ponderador: cuánto pesa este ítem en el gasto del período.
       peso: obs.reduce((t, o) => t + o.gastado, 0),
     });
   }
@@ -119,8 +96,6 @@ export function calcular(movimientos) {
   let tem = null;
   if (items.length) {
     const pesoTotal = items.reduce((t, i) => t + i.peso, 0);
-    // Ponderado por gasto: que suba 10% el alquiler no es lo mismo que suba
-    // 10% el café, aunque los dos sean "un ítem que aumentó 10%".
     if (pesoTotal > 0) tem = items.reduce((t, i) => t + i.tem * i.peso, 0) / pesoTotal;
   }
 
