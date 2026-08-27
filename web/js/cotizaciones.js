@@ -2,7 +2,7 @@
 
 const URL_DOLAR_OFICIAL = "https://dolarapi.com/v1/dolares/oficial";
 const URL_EURO_ARS = "https://dolarapi.com/v1/cotizaciones/eur";
-const URL_EUR_USD = "https://api.frankfurter.app/latest?from=EUR&to=USD";
+const URL_EUR_USD = "https://api.frankfurter.dev/v1/latest?from=EUR&to=USD";
 
 const CLAVE_CACHE = "cuentix:cotizaciones";
 const VIGENCIA_MS = 30 * 60 * 1000;
