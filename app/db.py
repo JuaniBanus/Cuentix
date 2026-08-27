@@ -801,6 +801,42 @@ def gastado_en_reto(reto: dict, *, user_id: str) -> Decimal:
     return total
 
 
+def guardar_inversiones(inversiones: list[Inversion], *, user_id: str) -> list[str]:
+    """Inserta varias tenencias de una y devuelve sus ids, en el mismo orden."""
+    if not inversiones:
+        return []
+
+    dueno = _exigir(user_id)
+    filas = [
+        {
+            "user_id": dueno,
+            "tipo": inv.tipo.value,
+            "ticker": inv.ticker,
+            "nombre": inv.nombre,
+            "cantidad": str(inv.cantidad),
+            "precio_compra": str(inv.precio_compra),
+            "moneda": inv.moneda.value,
+            "fecha_compra": inv.fecha_compra.isoformat(),
+            "sector": inv.sector,
+        }
+        for inv in inversiones
+    ]
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_INVERSIONES).insert(filas).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el insert múltiple de inversiones: %s", detalle)
+        raise DBError(f"No pude guardar las inversiones: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando las inversiones")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data or len(respuesta.data) != len(inversiones):
+        raise DBError("El insert de inversiones no devolvió todas las filas.")
+    return [str(fila["id"]) for fila in respuesta.data]
+
+
 def cerrar_inversiones(busqueda: str, *, user_id: str, fecha: date | None = None) -> list[dict]:
     """Marca como cerradas las tenencias activas que coincidan. Nunca borra.
 

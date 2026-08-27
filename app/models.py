@@ -40,6 +40,7 @@ class Intencion(str, Enum):
     REGISTRAR = "registrar"
     REGISTRAR_VARIOS = "registrar_varios"
     REGISTRAR_INVERSION = "registrar_inversion"
+    REGISTRAR_INVERSIONES = "registrar_inversiones"
     CERRAR_INVERSION = "cerrar_inversion"
     CREAR_ALERTA = "crear_alerta"
     VER_ALERTAS = "ver_alertas"

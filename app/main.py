@@ -76,6 +76,7 @@ from app.db import (
     movimientos_para_termometro,
     cerrar_inversiones,
     guardar_inversion,
+    guardar_inversiones,
     guardar_movimiento,
     guardar_movimientos,
     imputar_movimiento,
@@ -674,6 +675,9 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) 
     if intencion is Intencion.REGISTRAR_INVERSION:
         return await _resolver_inversion(interpretacion, user_id)
 
+    if intencion is Intencion.REGISTRAR_INVERSIONES:
+        return await _resolver_inversiones(interpretacion, user_id)
+
     if intencion is Intencion.CERRAR_INVERSION:
         return await _resolver_cierre(interpretacion, user_id)
 
@@ -1168,11 +1172,46 @@ async def _resolver_inversion(interpretacion: Interpretacion, user_id: str) -> s
 
     inversion = interpretacion.inversion
     inversion_id = await run_in_threadpool(
-        cerrar_inversiones,
-    guardar_inversion, inversion, user_id=user_id
+        guardar_inversion, inversion, user_id=user_id
     )
     logger.info("Inversión %s guardada: %s", inversion_id, inversion)
     return _confirmacion_inversion(inversion)
+
+
+async def _resolver_inversiones(interpretacion: Interpretacion, user_id: str) -> str:
+    """Guarda las compras completas y avisa cuáles quedaron sin datos."""
+    compras = list(interpretacion.inversiones)
+    incompletas = interpretacion.faltantes
+
+    if not compras:
+        return _texto_incompletas(incompletas)
+
+    ids = await run_in_threadpool(guardar_inversiones, compras, user_id=user_id)
+    logger.info("Inversiones guardadas en lote: %s", ids)
+
+    lineas = []
+    for inv in compras:
+        identidad = f"{inv.ticker} ({inv.nombre})" if inv.ticker else inv.nombre
+        total = inv.cantidad * inv.precio_compra
+        lineas.append(
+            f"· {_formatear_cantidad(inv.cantidad)} {identidad} — "
+            f"{_formatear_monto(total, inv.moneda)}"
+        )
+
+    cabeza = f"{len(compras)} compras registradas" if len(compras) > 1 else "1 compra registrada"
+    return "📈 " + cabeza + "\n" + "\n".join(lineas) + _texto_incompletas(incompletas, sufijo=True)
+
+
+def _texto_incompletas(incompletas, sufijo: bool = False) -> str:
+    """Lista las compras que no se pudieron guardar por falta de datos."""
+    if not incompletas:
+        return ""
+    nombres = ", ".join(incompletas)
+    aviso = (
+        f"No pude guardar {nombres}: me falta la cantidad o el precio por unidad. "
+        "Mandámelas de nuevo con los dos datos."
+    )
+    return ("\n\n" + aviso) if sufijo else aviso
 
 
 async def _resolver_cierre(interpretacion: Interpretacion, user_id: str) -> str:

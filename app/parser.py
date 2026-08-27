@@ -149,6 +149,7 @@ class _InterpretacionExtraida(BaseModel):
     financiacion: _FinanciacionExtraida | None = None
     consulta: _ConsultaExtraida | None = None
     inversion: _InversionExtraida | None = None
+    inversiones: list[_InversionExtraida] | None = None
     cierre: _CierreExtraido | None = None
     alerta: _AlertaExtraida | None = None
 
@@ -165,6 +166,7 @@ class Interpretacion(NamedTuple):
     financiacion: Financiacion | None = None
     consulta: Consulta | None = None
     inversion: Inversion | None = None
+    inversiones: list[Inversion] = ()
     cierre: str | None = None
     cierre_fecha: date | None = None
     alerta: Alerta | None = None
@@ -392,6 +394,22 @@ cotización que creas saber ni una cantidad con un 1 por defecto: el sistema
 se encarga de preguntar lo que falte.
 Ejemplo: "compré bitcoin" -> tipo=cripto, ticker=BTC, nombre=Bitcoin,
 cantidad=null, precio_compra=null.
+
+================== SI SON VARIAS COMPRAS EN UN MENSAJE ===================
+Poné intencion="registrar_inversiones" y completá la lista "inversiones", una
+entrada por compra, con los MISMOS campos de arriba. El resto en null.
+
+Es el caso de un mensaje con una compra por línea:
+  compre 17 acciones de BYMA a $302,28
+  compre 13 acciones de GGAL a $8111,70
+  compre 2 CEDEARs de MELI a $22896.38
+
+NO uses registrar_varios para esto. registrar_varios es para GASTOS e ingresos
+sueltos. Si cada línea nombra un activo con cantidad y precio unitario, son
+compras de inversión y van todas en "inversiones", aunque sean cinco.
+
+Si a una línea le falta el precio o la cantidad, incluila igual con esos campos
+en null: el sistema avisa cuáles quedaron incompletas y guarda el resto.
 
 ===================== SI VENDIÓ O CERRÓ UNA INVERSIÓN =====================
 Poné intencion="cerrar_inversion" y completá "cierre". El resto en null.
@@ -738,6 +756,28 @@ def _a_inversion(
     return inversion, ()
 
 
+def _a_inversiones(
+    items: list[_InversionExtraida] | None, hoy: date
+) -> tuple[list[Inversion], tuple[str, ...]]:
+    """Separa las compras completas de las que les falta algo."""
+    completas: list[Inversion] = []
+    incompletas: list[str] = []
+
+    for indice, item in enumerate(items or [], start=1):
+        try:
+            inversion, faltantes = _a_inversion(item, hoy)
+        except ParserError:
+            inversion, faltantes = None, ("datos",)
+
+        if inversion is None:
+            nombre = (item.nombre or item.ticker or f"la compra {indice}").strip()
+            incompletas.append(nombre)
+            continue
+        completas.append(inversion)
+
+    return completas, tuple(incompletas)
+
+
 def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[str, ...]]:
     """Arma la Alerta, o devuelve qué falta para poder armarla."""
     if extraida is None:
@@ -999,6 +1039,17 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             intencion=Intencion.REGISTRAR_INVERSION,
             inversion=inversion,
             faltantes=faltantes,
+        )
+
+    if extraida.intencion is Intencion.REGISTRAR_INVERSIONES:
+        inversiones, incompletas = _a_inversiones(extraida.inversiones, hoy)
+        if not inversiones and not incompletas:
+            logger.warning("Intención registrar_inversiones sin ítems para %r", texto)
+            raise ParserError("Dijo varias compras pero no extrajo ninguna.")
+        return Interpretacion(
+            intencion=Intencion.REGISTRAR_INVERSIONES,
+            inversiones=inversiones,
+            faltantes=incompletas,
         )
 
     if extraida.intencion is Intencion.CERRAR_INVERSION:
