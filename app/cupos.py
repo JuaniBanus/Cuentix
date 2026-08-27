@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from postgrest import APIError
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 SERVICIO_MERCADO = "mercado"
 
 TOPE_REFRESCOS_DIA = 5
-TOPE_UNIDADES_DIA = 60
+TOPE_UNIDADES_DIA = 100
 TOPE_GLOBAL_DIA = 700
 TOPE_TICKERS_DIA = 40
 
@@ -100,3 +101,29 @@ def restante(user_id: str, servicio: str = SERVICIO_MERCADO) -> dict[str, Any]:
 def barriendo(estado: dict[str, Any]) -> bool:
     """Si el patrón de tickers del día parece un barrido y no un portafolio."""
     return int(estado.get("tickers") or 0) > TOPE_TICKERS_DIA
+
+
+def global_hoy(servicio: str = SERVICIO_MERCADO) -> dict[str, Any]:
+    """Lo gastado hoy contra el proveedor, según la base y no según el proceso."""
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    try:
+        filas = (
+            _obtener_cliente()
+            .table("consumo_global")
+            .select("unidades")
+            .eq("dia", hoy)
+            .eq("servicio", servicio)
+            .limit(1)
+            .execute()
+        ).data or []
+    except APIError as exc:
+        logger.warning("No se pudo leer el consumo global: %s", exc)
+        return {}
+
+    gastadas = int(filas[0]["unidades"]) if filas else 0
+    return {
+        "dia": hoy,
+        "gastadas": gastadas,
+        "tope": TOPE_GLOBAL_DIA,
+        "restantes": max(0, TOPE_GLOBAL_DIA - gastadas),
+    }
