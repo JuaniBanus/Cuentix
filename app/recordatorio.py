@@ -1,29 +1,4 @@
-"""Recordatorio diario: "¿Cómo fue tu día? Contame lo que gastaste."
-
-Dos mitades:
-
-- La configuración, que el usuario fija con /recordatorio desde Telegram.
-- El envío, que dispara un cron externo cada hora contra
-  POST /tareas/recordatorios/<secreto>.
-
-POR QUÉ UN CRON EXTERNO Y NO UN SCHEDULER ADENTRO
-El servicio de Render duerme tras ~15 minutos sin tráfico. Un asyncio.sleep o
-un APScheduler dentro del proceso se congelan con él, y a las 21 no hay nadie
-despierto para mandar nada. Justo a esa hora, que es cuando el bot no se usó
-en todo el día, es cuando más seguro está dormido. El disparo tiene que venir
-de afuera. Es el mismo razonamiento que las alertas de precio, y por eso
-comparte su secreto y su forma.
-
-POR QUÉ EL CRON CORRE CADA HORA Y NO A LAS 21
-Porque la hora la elige cada usuario, y porque el cron de GitHub Actions no es
-puntual: en momentos de carga los disparos se retrasan, a veces bastante. Un
-cron "a las 21 en punto" que llega 21:40 no manda nada si el código exige que
-sean exactamente las 21. Corriendo cada hora y preguntando "¿a quién le toca
-en SU zona horaria?", un atraso mueve el aviso pero no lo pierde.
-
-Y por qué se guarda `ultimo_envio`: con disparos que se pueden repetir o
-solapar, "es la hora" no alcanza para no mandar dos veces.
-"""
+"""Recordatorio diario: "¿Cómo fue tu día? Contame lo que gastaste." """
 
 from __future__ import annotations
 
@@ -52,8 +27,6 @@ MSG_RECORDATORIO = (
     "«gasté 5 lucas en el súper, 2 en un café y cargué 30 de nafta»"
 )
 
-# /recordatorio · /recordatorio 21 · /recordatorio 21:00 · /recordatorio 9hs
-# /recordatorio off · /recordatorio no
 _COMANDO = re.compile(
     r"^/recordatorio(?:@\w+)?\s*(?P<resto>.*)$", re.IGNORECASE | re.DOTALL
 )
@@ -66,12 +39,7 @@ def es_comando(texto: str) -> bool:
 
 
 def atender_comando(chat_id: int, texto: str, user_id: str) -> str:
-    """Resuelve /recordatorio y devuelve qué contestarle al usuario.
-
-    `user_id` va porque la fila de `recordatorios` tiene dueño: es lo que hace
-    que el recordatorio también aparezca en la web de esa persona, y lo que
-    impide que dos usuarios que compartan un chat se pisen la configuración.
-    """
+    """Resuelve /recordatorio y devuelve qué contestarle al usuario."""
     coincidencia = _COMANDO.match(texto.strip())
     resto = (coincidencia.group("resto") or "").strip().lower() if coincidencia else ""
 
@@ -94,11 +62,7 @@ def atender_comando(chat_id: int, texto: str, user_id: str) -> str:
 
 
 def _leer_hora(texto: str) -> int | None:
-    """"21", "21:00", "9hs" -> 21, 21, 9. Los minutos se ignoran a propósito.
-
-    El cron corre una vez por hora, así que un "21:30" no se podría cumplir:
-    prometer una precisión que no existe es peor que redondear y decirlo.
-    """
+    """"21", "21:00", "9hs" -> 21, 21, 9. Los minutos se ignoran a propósito."""
     coincidencia = _HORA.match(texto)
     if not coincidencia:
         return None
@@ -145,11 +109,7 @@ def _ahora_en(zona: str) -> datetime:
 
 
 def _le_toca(config: dict) -> bool:
-    """¿A este chat le corresponde el aviso en esta corrida?
-
-    Dos condiciones: que en SU zona sea la hora que eligió, y que hoy no se le
-    haya mandado ya. La segunda es la que sobrevive a un cron que se repite.
-    """
+    """¿A este chat le corresponde el aviso en esta corrida?"""
     ahora = _ahora_en(config.get("zona_horaria"))
     if ahora.hour != int(config.get("hora", HORA_POR_DEFECTO)):
         return False
@@ -157,13 +117,7 @@ def _le_toca(config: dict) -> bool:
 
 
 async def enviar_recordatorios() -> dict:
-    """Manda el aviso a los chats a los que les toca ahora.
-
-    Cada envío va aislado: si un chat falla —bloqueó al bot, por ejemplo—, los
-    demás se mandan igual. Devuelve el conteo para que el cron sepa qué pasó.
-    """
-    # Importado acá y no arriba: telegram.py importa config, y a nivel de
-    # módulo se armaría un ciclo con main.py.
+    """Manda el aviso a los chats a los que les toca ahora."""
     from app.telegram import TelegramError, enviar_mensaje
 
     activos = recordatorios_activos()
@@ -185,8 +139,6 @@ async def enviar_recordatorios() -> dict:
         try:
             marcar_recordatorio_enviado(chat_id, _ahora_en(config.get("zona_horaria")).date())
         except DBError:
-            # El aviso ya salió. No poder anotarlo solo arriesga un repetido
-            # dentro de la misma hora, que es mejor que no haberlo mandado.
             logger.warning("Recordatorio enviado a %s pero no pude marcarlo", chat_id)
 
     return {"activos": len(activos), "enviados": enviados, "fallidos": fallidos}

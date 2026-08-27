@@ -6,17 +6,12 @@ import { hoyISO } from "./format.js";
 
 export const PRIORIDADES = ["alta", "media", "baja"];
 
-// Los colores se guardan como nombre de token y no como hex: así el objetivo
-// se ve bien en tema claro y en oscuro. Un #12a5bd fijo quedaría lavado sobre
-// blanco.
 export const COLORES = ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6"];
 
 export const ICONOS = ["🎯", "✈️", "🏠", "🚗", "🎓", "💻", "🏖️", "🎁", "💍", "🩺", "📚", "🛠️"];
 
 /** Los ahorros imputados a un objetivo, en la moneda del objetivo. */
 export function aportesDe(objetivo, ahorros) {
-  // El filtro por moneda no es un detalle: un ahorro en dólares imputado a un
-  // objetivo en pesos sumaría 400 sobre una meta de 500.000.
   return ahorros.filter(
     (m) => m.tipo === "ahorro" && m.objetivo_id === objetivo.id && m.moneda === objetivo.moneda
   );
@@ -33,8 +28,6 @@ export function progresoDe(objetivo, ahorros) {
     aportado,
     meta,
     restante: Math.max(meta - aportado, 0),
-    // La barra se corta en 100; el número de al lado puede decir 130%, que es
-    // información real: pasaste la meta.
     porcentaje: Math.min(porcentaje, 100),
     porcentajeReal: porcentaje,
     completado: meta > 0 && aportado >= meta,
@@ -47,17 +40,7 @@ export function estadoDe(objetivo, progreso) {
   return objetivo.estado === "pausado" ? "pausado" : "activo";
 }
 
-/**
- * A este ritmo, cuánto falta.
- *
- * El ritmo sale de dividir lo aportado por el tiempo que llevás aportando, no
- * por la cantidad de aportes: dos depósitos en un año y dos en una semana no
- * son el mismo ritmo.
- *
- * El piso de 30 días evita el absurdo de arrancar: si tu único aporte fue hoy,
- * dividir por medio día daría un ritmo de millones por mes y una proyección de
- * "lo terminás mañana".
- */
+/** A este ritmo, cuánto falta. */
 export function proyeccion(progreso, hoy = new Date()) {
   if (progreso.completado || !progreso.aportes.length) return null;
 
@@ -72,7 +55,6 @@ export function proyeccion(progreso, hoy = new Date()) {
   return {
     ritmo,
     meses,
-    // Más allá de diez años la cuenta es correcta pero no significa nada.
     lejisimos: meses > 120,
     etiqueta: `${MESES[fin.getMonth()]} ${fin.getFullYear()}`,
   };
@@ -81,10 +63,7 @@ export function proyeccion(progreso, hoy = new Date()) {
 const ORDEN_PRIORIDAD = { alta: 0, media: 1, baja: 2 };
 const ORDEN_ESTADO = { activo: 0, pausado: 1, completado: 2 };
 
-/**
- * Lo que está en curso primero, después lo pausado y al final lo terminado.
- * Dentro de cada grupo, por prioridad y después por la fecha más cercana.
- */
+/** Lo que está en curso primero, después lo pausado y al final lo terminado. */
 export function ordenar(objetivos, ahorros) {
   return [...objetivos]
     .map((objetivo) => {

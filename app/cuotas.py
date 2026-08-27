@@ -1,36 +1,4 @@
-"""«¿Cuotas o contado?»: cuál de las dos formas de pagar sale más barata.
-
-EL MÉTODO, Y POR QUÉ NO ES COMPARAR TOTALES
-
-Lo intuitivo es sumar las cuotas y comparar contra el precio de contado: si
-12 × $100.000 = $1.200.000 y al contado sale $900.000, "financiar sale
-$300.000 más caro". Está mal, y en Argentina está muy mal.
-
-Un peso dentro de doce meses no vale un peso de hoy. La plata que NO gastás
-hoy queda rindiendo, y con esos intereses pagás parte de las cuotas. Lo que
-hay que comparar es el VALOR PRESENTE de las cuotas contra el precio contado:
-
-    VPN = Σ cuota / (1 + r)^k     con k = 1..N
-
-donde r es la tasa mensual a la que podés poner la plata que no gastaste.
-
-De ahí sale la comparación limpia: la TEM IMPLÍCITA de la financiación, que es
-la tasa que hace que el valor presente de las cuotas iguale al precio contado.
-Si esa tasa es MENOR que la que conseguís invirtiendo, financiar conviene:
-te están prestando más barato de lo que a vos te rinde. Si es mayor, contado.
-
-QUÉ TASA SE USA COMO REFERENCIA
-La del plazo fijo, no la inflación. Para elegir entre dos formas de pagar lo
-mismo, lo que decide es cuánto rinde la plata que no gastás. La inflación se
-muestra al costado como contexto, porque es la que empuja las tasas, pero no
-entra en la cuenta.
-
-LO QUE ESTO NO ES
-No es asesoramiento financiero. Supone que la tasa se mantiene constante los
-N meses —que no pasa—, ignora comisiones y seguros que el comercio puede
-sumar, y no sabe si podés sostener la cuota todos los meses. El mensaje lo
-dice al final, sin letra chica.
-"""
+"""«¿Cuotas o contado?»: cuál de las dos formas de pagar sale más barata."""
 
 from __future__ import annotations
 
@@ -42,18 +10,12 @@ from app.tasas import Tasas
 
 logger = logging.getLogger(__name__)
 
-# Precisión y techo de la búsqueda de la tasa implícita.
 _PRECISION = Decimal("0.000001")
-_TASA_MAXIMA = Decimal("10")  # 1000% mensual: más que eso no es un caso real
+_TASA_MAXIMA = Decimal("10")
 
 
 def valor_presente(cuota: Decimal, cuotas: int, tasa: Decimal) -> Decimal:
-    """Cuánto valen HOY N cuotas iguales, descontadas a `tasa` mensual.
-
-    La primera cuota se cuenta a un mes, no hoy: es lo habitual con tarjeta,
-    donde cae en el resumen siguiente. Si cayera hoy, el cálculo favorecería
-    menos a la financiación.
-    """
+    """Cuánto valen HOY N cuotas iguales, descontadas a `tasa` mensual."""
     if tasa <= -1:
         return cuota * cuotas
     total = Decimal("0")
@@ -64,27 +26,17 @@ def valor_presente(cuota: Decimal, cuotas: int, tasa: Decimal) -> Decimal:
 
 
 def tasa_implicita(cuota: Decimal, cuotas: int, contado: Decimal) -> Decimal | None:
-    """La TEM que iguala el valor presente de las cuotas al precio contado.
-
-    Se resuelve por bisección y no con una fórmula porque no existe una
-    cerrada para N cuotas. El valor presente baja cuando la tasa sube, así que
-    la función es monótona y la bisección siempre converge.
-
-    Devuelve None si no hay solución en un rango razonable (por ejemplo, si
-    las cuotas suman menos que el contado: ahí no hay interés que valga).
-    """
+    """La TEM que iguala el valor presente de las cuotas al precio contado."""
     if cuotas <= 0 or contado <= 0 or cuota <= 0:
         return None
 
     total = cuota * cuotas
     if total <= contado:
-        # Financiar sale igual o menos en pesos nominales: la tasa implícita
-        # es cero o negativa. Cero es la respuesta útil ("sin interés").
         return Decimal("0")
 
     bajo, alto = Decimal("0"), _TASA_MAXIMA
     if valor_presente(cuota, cuotas, alto) > contado:
-        return None  # ni al 1000% mensual se descuenta tanto
+        return None
 
     for _ in range(200):
         medio = (bajo + alto) / 2
@@ -120,13 +72,10 @@ class Comparacion:
             if contado > 0 else Decimal("0")
         )
 
-        # La tasa de referencia: la que dijo el usuario gana sobre la del
-        # mercado, porque él sabe dónde pone la plata y nosotros no.
         self.tem_referencia = financiacion.tasa_mensual or tasas.tem_inversion
 
         self.tem_implicita = tasa_implicita(cuota, n, contado)
         self.vpn_cuotas = valor_presente(cuota, n, self.tem_referencia).quantize(Decimal("0.01"))
-        # Positivo = financiar deja plata en el bolsillo, medido en pesos de hoy.
         self.ahorro = (contado - self.vpn_cuotas).quantize(Decimal("0.01"))
         self.conviene_financiar = self.ahorro > 0
 
@@ -136,20 +85,10 @@ def comparar(financiacion: Financiacion, tasas: Tasas) -> Comparacion:
 
 
 def veredicto_con(financiacion: Financiacion, tasa: Decimal) -> tuple[bool, Decimal]:
-    """(conviene financiar, cuánto se ahorra) con una tasa alternativa.
-
-    Sirve para mostrar el resultado bajo dos supuestos distintos en vez de
-    elegir uno y esconder el otro: cuál conviene depende de a cuánto rinde la
-    plata, y el usuario tiene derecho a ver esa bisagra.
-    """
+    """(conviene financiar, cuánto se ahorra) con una tasa alternativa."""
     vpn = valor_presente(financiacion.monto_cuota, financiacion.cuotas, tasa)
     ahorro = (financiacion.precio_contado - vpn).quantize(Decimal("0.01"))
     return ahorro > 0, ahorro
-
-
-# --------------------------------------------------------------------------
-# Redacción
-# --------------------------------------------------------------------------
 
 
 def _pct(valor: Decimal) -> str:
@@ -172,7 +111,6 @@ def redactar(
     lineas.append(f"💳 {que}: {f.cuotas} cuotas de {fmt(f.monto_cuota, moneda)} o {fmt(f.precio_contado, moneda)} al contado.")
     lineas.append("")
 
-    # 1. Lo nominal, que es lo que todos miran primero.
     if comparacion.recargo > 0:
         lineas.append(
             f"En pesos, las cuotas suman {fmt(comparacion.total_cuotas, moneda)}: "
@@ -186,7 +124,6 @@ def redactar(
     else:
         lineas.append("En pesos suman exactamente lo mismo: son cuotas sin interés.")
 
-    # 2. Por qué eso no alcanza.
     lineas.append("")
     lineas.append("Pero un peso de dentro de un año no vale un peso de hoy 👇")
     lineas.append("")
@@ -207,14 +144,12 @@ def redactar(
             f"• De referencia, la inflación viene a {_pct(comparacion.tasas.inflacion_mensual)} mensual."
         )
 
-    # 3. La cuenta que decide.
     lineas.append("")
     lineas.append(
         f"Pagando en cuotas y dejando la plata rindiendo, hoy te alcanzaría con "
         f"{fmt(comparacion.vpn_cuotas, moneda)} para cubrirlas todas."
     )
 
-    # 4. La conclusión, con el razonamiento a la vista.
     lineas.append("")
     if comparacion.conviene_financiar:
         lineas.append(
@@ -237,11 +172,6 @@ def redactar(
                 f"y tu plata rinde {referencia}. El crédito sale más caro de lo que ganás."
             )
 
-    # 4 bis. El mismo cálculo con lo que rinde SU cartera.
-    #
-    # Va como segundo escenario y no reemplazando al primero: es rendimiento
-    # pasado, y en una cartera chica puede ser cualquier cosa. Mostrar los dos
-    # deja a la vista de qué depende la conclusión, en vez de esconderlo.
     if cartera is not None:
         lineas.append("")
         conviene_cartera, ahorro_cartera = veredicto_con(f, cartera.tem)
@@ -261,7 +191,6 @@ def redactar(
                 "Cuál vale depende de si esperás que tu cartera siga rindiendo igual."
             )
 
-    # 5. Lo que la cuenta no sabe.
     lineas.append("")
     avisos = ["Es orientativo: supone que la tasa se mantiene los "
               f"{f.cuotas} meses y no cuenta comisiones ni seguros del comercio."]

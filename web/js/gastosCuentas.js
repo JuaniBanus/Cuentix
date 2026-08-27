@@ -1,46 +1,21 @@
 // Las cuentas de la pantalla Gastos.
-//
-// Puras y sin DOM, para poder probarlas: son las que más fácil se equivocan en
-// silencio (un promedio dividido por el número de días equivocado no rompe
-// nada, solo miente).
 
 import { serieAcumulada, totalesPorCategoria, totalPorTipo } from "./cuentas.js";
 import { diasTranscurridos } from "./periodo.js";
 
-/**
- * Variación contra el período anterior.
- *
- * Cuando antes no se gastó nada no hay porcentaje posible —dividir por cero da
- * infinito, y "+∞%" no le dice nada a nadie—: se devuelve null y la pantalla
- * escribe "sin gastos en julio".
- */
+/** Variación contra el período anterior. */
 export function variacion(actual, previo) {
   if (previo === 0) return null;
   return ((actual - previo) / previo) * 100;
 }
 
-/**
- * Promedios. El diario divide por los días que ya pasaron, no por los que tiene
- * el período: el 5 de agosto llevás 5 días de gasto, no 31.
- *
- * El mensual es el diario por 30, o sea a qué ritmo mensual vas. En un mes
- * terminado da casi el total; en uno en curso, la proyección.
- */
+/** Promedios. El diario divide por los días que ya pasaron, no por los que tiene */
 export function promedios(total, periodo, hoy = new Date()) {
   const diario = total / diasTranscurridos(periodo, hoy);
   return { diario, mensual: diario * 30 };
 }
 
-/**
- * La categoría que más creció contra el período anterior.
- *
- * Se ordena por cuánto creció en pesos y no en porcentaje: una categoría que
- * pasó de $10 a $100 creció 900% y encabezaría el ranking para siempre, aunque
- * sean noventa pesos. El porcentaje igual se devuelve, para mostrarlo.
- *
- * `esNueva` marca las que antes no existían: ahí no hay porcentaje, y decir
- * "nueva" es más claro que cualquier número.
- */
+/** La categoría que más creció contra el período anterior. */
 export function laQueMasCrecio(categoriasActuales, categoriasPrevias) {
   const previas = new Map(categoriasPrevias.map((c) => [c.categoria, c.total]));
 

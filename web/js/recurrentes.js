@@ -1,32 +1,8 @@
 // Detección de gastos recurrentes y suscripciones.
-//
-// QUÉ CUENTA COMO RECURRENTE
-// Tres condiciones juntas, y las tres hacen falta:
-//
-//   1. Al menos 3 cargos del mismo ítem. Con 2 no hay periodicidad, hay una
-//      coincidencia.
-//   2. Espaciados de forma regular. Se mide la MEDIANA de los días entre
-//      cargos y se exige que los intervalos no se desvíen mucho de ella: un
-//      Netflix cae cada 30 ± 3 días, un almuerzo cae cuando cae.
-//   3. Monto estable. Se compara cada cargo contra la mediana; si varían
-//      demasiado, es un rubro que se repite, no una suscripción.
-//
-// La tercera es la que separa "gasto recurrente" de "gasto frecuente". El
-// súper también aparece todos los meses, pero por montos distintos: eso es un
-// hábito, no un débito automático.
-//
-// LO QUE NO HACE
-// No cancela nada ni recomienda cancelar. Muestra lo que se está pagando y
-// hace cuánto, que es información que la gente no tiene a mano. Qué hacer con
-// eso es del usuario.
 
-// Con menos de 3 no hay periodicidad que medir.
 const CARGOS_MINIMOS = 3;
-// Cuánto puede desviarse un intervalo de la mediana sin dejar de ser regular.
 const TOLERANCIA_DIAS = 0.35;
-// Cuánto puede variar el monto respecto de la mediana.
 const TOLERANCIA_MONTO = 0.25;
-// Períodos que se reconocen, en días.
 const PERIODOS = [
   { nombre: "semanal", dias: 7, porMes: 4.33 },
   { nombre: "quincenal", dias: 15, porMes: 2 },
@@ -50,7 +26,6 @@ function periodoDe(diasMediana) {
     const d = Math.abs(diasMediana - p.dias) / p.dias;
     if (d < distancia) [mejor, distancia] = [p, d];
   }
-  // Si no se parece a ningún período conocido, no es una suscripción.
   return distancia <= TOLERANCIA_DIAS ? mejor : null;
 }
 
@@ -59,12 +34,6 @@ function claveDe(m) {
   return (m.clave_item || m.comercio || m.descripcion || m.categoria || "").trim().toLowerCase();
 }
 
-/**
- * @param {Array} movimientos gastos, TODA la historia
- * @param {string} moneda
- * @param {string} hoyISO para calcular "el próximo cae el…"
- * @returns {Array} recurrentes, del que más pesa al que menos
- */
 export function detectar(movimientos, moneda, hoyISO) {
   const porItem = new Map();
 
@@ -95,7 +64,6 @@ export function detectar(movimientos, moneda, hoyISO) {
     const diasMediana = mediana(intervalos);
     if (diasMediana <= 0) continue;
 
-    // Regularidad: ningún intervalo puede despegarse mucho de la mediana.
     const regular = intervalos.every(
       (d) => Math.abs(d - diasMediana) / diasMediana <= TOLERANCIA_DIAS
     );
@@ -122,16 +90,12 @@ export function detectar(movimientos, moneda, hoyISO) {
       cargos: cargos.length,
       periodo: periodo.nombre,
       montoTipico,
-      // Lo que representa por mes, para poder sumarlos entre sí.
       porMes: montoTipico * periodo.porMes,
       primero: cargos[0].fecha,
       ultimo: ultimo.fecha,
       diasDesdeUltimo,
       totalPagado: montos.reduce((t, x) => t + x, 0),
-      // Se pasó bastante de su período: puede haberse dado de baja, o puede
-      // que el cargo esté por venir. Se marca para revisar, no se concluye.
       vencido: diasDesdeUltimo > periodo.dias * (1 + TOLERANCIA_DIAS * 2),
-      // Viene cobrándose hace rato y sigue: candidato a "¿lo seguís usando?".
       mesesActivo: Math.round(
         (new Date(ultimo.fecha) - new Date(cargos[0].fecha)) / 86400000 / 30.44
       ),

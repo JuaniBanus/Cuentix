@@ -1,5 +1,4 @@
 // Pedazos que usan varias pantallas. Están acá y no en la primera que los
-// necesitó, para que Gastos no tenga que importar de Inicio.
 
 import { colorDeCategoria } from "../donut.js";
 import { esc, fechaCorta, monto, TOPE_CATEGORIAS } from "../format.js";
@@ -37,14 +36,7 @@ export function acotar(categorias) {
   ];
 }
 
-/**
- * Las cuatro celdas de una barra de categoría. Van aparte porque la barra se
- * usa suelta en Ahorros e Inversiones y adentro de un botón en Gastos, donde
- * abre el detalle: cambia el envoltorio, no el contenido.
- *
- * El ancho mínimo es 1.5% para que una categoría de $50 entre $500.000 se vea
- * como una línea fina y no como nada.
- */
+/** Las cuatro celdas de una barra de categoría. Van aparte porque la barra se */
 export function celdasDeBarra(categoria, indice, moneda) {
   return `
     <span class="barra-nombre">${esc(categoria.categoria)}</span>

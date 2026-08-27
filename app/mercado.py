@@ -1,34 +1,4 @@
-"""Proxy de precios de mercado: acciones, CEDEARs e índices.
-
-============================ POR QUÉ UN PROXY ============================
-
-Por dos motivos distintos, y conviene no confundirlos porque aplican a
-proveedores distintos:
-
-1. LA CLAVE. Twelve Data pide una API key. Si la web llamara directo, la clave
-   viajaría en el JavaScript y cualquiera la leería con Ctrl+U, igual que
-   pasaría con la service_role de Supabase. (Curiosidad verificada: Twelve Data
-   y Finnhub SÍ mandan Access-Control-Allow-Origin: *, así que desde el
-   navegador funcionarían. El problema no es CORS ahí, es la clave.)
-
-2. CORS. Data912, que es de donde salen los papeles argentinos, NO manda
-   ningún header de CORS. Verificado con curl: el navegador bloquea la llamada
-   antes de que salga. Ahí el proxy es la única salida, aunque no haya clave.
-
-============================ EL PRESUPUESTO ============================
-
-El plan gratuito de Twelve Data da 800 llamadas por día y 8 por minuto, y el
-contador diario se reinicia a medianoche UTC. Con eso, cachear no es una
-optimización: sin caché, una sola pantalla abierta un rato agota la cuota.
-
-El caché es un diccionario en memoria, y eso condiciona dónde puede vivir esto
-—ver la nota de arriba de todo en el endpoint—: el proceso tiene que sobrevivir
-entre pedidos para que el caché sirva de algo.
-
-Cuando el presupuesto se agota, NO se devuelve un error: se sirve lo último que
-haya, marcado como vencido. Un precio de hace una hora dice bastante más que
-una pantalla en blanco, siempre que la respuesta admita que es viejo.
-"""
+"""Proxy de precios de mercado: acciones, CEDEARs e índices."""
 
 from __future__ import annotations
 
@@ -48,37 +18,17 @@ logger = logging.getLogger(__name__)
 URL_TWELVE = "https://api.twelvedata.com"
 URL_DATA912 = "https://data912.com"
 
-# Cuánto vale un dato antes de volver a pedirlo. Media hora es el punto donde
-# el presupuesto alcanza cómodo: con 30 minutos, seguir diez símbolos toda la
-# rueda son ~320 llamadas de las 800 del día.
 TTL_SEGUNDOS = 30 * 60
 
-# Freno propio, más bajo que el del proveedor, para no llegar nunca al 429:
-# el límite real es 800/día y 8/minuto.
 TOPE_DIARIO = 700
 TOPE_POR_MINUTO = 6
 
 TIEMPO_LIMITE = 10.0
 
-# Los papeles argentinos no están en Twelve Data; salen de Data912, que además
-# devuelve la rueda entera en un solo pedido y por eso se cachea como un bloque.
 LISTAS_ARG = ("arg_stocks", "arg_cedears", "arg_bonds")
 
-# Qué puede tener un ticker. Letras, números, punto y guion cubren todo lo real
-# —BRK.B, RTY-USD, GGAL— y nada más.
-#
-# No alcanzaba con el largo. En _historico_argentino el ticker se pega dentro de
-# una RUTA (/historical/{tipo}/{ticker}), así que un "../" ahí no consulta un
-# activo: cambia a qué recurso de data912.com se le pega el pedido. Validar el
-# alfabeto corta esa clase entera de problema en el único lugar donde entra.
 TICKER_VALIDO = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,19}$")
 
-# Cuántas entradas se guardan antes de tirar las más viejas.
-#
-# Sin tope, cada combinación de ticker y cantidad de días agrega una entrada que
-# no se borra nunca: `hist:us:AAPL:90` y `hist:us:AAPL:91` son dos. En los 512 MB
-# de Render eso es una fuga lenta, y quien la alimenta es cualquiera que llame al
-# endpoint. El caché existe para ahorrar cuota, no para ser un archivo histórico.
 TOPE_CACHE = 500
 
 
@@ -94,17 +44,11 @@ class ValorInvalido(MercadoError):
     """El pedido está mal armado. Es culpa de quien llama, no del proveedor."""
 
 
-# --------------------------------------------------------------------------
-# Caché y presupuesto
-# --------------------------------------------------------------------------
-
 _cache: dict[str, tuple[Any, float]] = {}
 _cliente: httpx.AsyncClient | None = None
 
-# Llamadas gastadas hoy, con el día al que corresponden para poder reiniciar.
 _gastadas = 0
 _dia_utc = ""
-# Marcas de tiempo de las últimas llamadas, para el freno por minuto.
 _recientes: list[float] = []
 
 
@@ -129,7 +73,7 @@ def _hoy_utc() -> str:
 def presupuesto() -> dict[str, Any]:
     """Cuánto queda del cupo diario. Se expone para poder monitorearlo."""
     global _gastadas, _dia_utc
-    if _dia_utc != _hoy_utc():  # cambió el día: el proveedor reinicia a las 00 UTC
+    if _dia_utc != _hoy_utc():
         _gastadas, _dia_utc = 0, _hoy_utc()
     return {"gastadas": _gastadas, "tope": TOPE_DIARIO, "restantes": max(0, TOPE_DIARIO - _gastadas)}
 
@@ -144,7 +88,7 @@ def _hay_cupo() -> bool:
 
 def _anotar_llamada() -> None:
     global _gastadas
-    presupuesto()  # reinicia el contador si cambió el día
+    presupuesto()
     _gastadas += 1
     _recientes.append(time.monotonic())
 
@@ -158,8 +102,6 @@ def _guardado(clave: str) -> tuple[Any, bool] | None:
 
 
 def _guardar(clave: str, dato: Any) -> None:
-    # Reinsertar mueve la clave al final, así el orden del dict queda por uso
-    # más reciente y descartar los primeros descarta lo más viejo.
     _cache.pop(clave, None)
     _cache[clave] = (dato, time.monotonic())
 
@@ -169,12 +111,7 @@ def _guardar(clave: str, dato: Any) -> None:
 
 
 def _limpiar_ticker(ticker: str) -> str:
-    """Normaliza y valida un ticker, o explica por qué no sirve.
-
-    Raises:
-        ValorInvalido: si está vacío, es muy largo o trae caracteres que ningún
-            ticker real tiene.
-    """
+    """Normaliza y valida un ticker, o explica por qué no sirve."""
     limpio = (ticker or "").strip().upper()
     if not limpio:
         raise ValorInvalido("Falta el ticker.")
@@ -193,11 +130,6 @@ def _limpiar_mercado(mercado: str | None) -> str:
     return elegido
 
 
-# --------------------------------------------------------------------------
-# Twelve Data
-# --------------------------------------------------------------------------
-
-
 async def _pedir_twelve(ruta: str, params: dict) -> dict:
     if not TWELVE_DATA_API_KEY:
         raise SinClave(
@@ -214,8 +146,6 @@ async def _pedir_twelve(ruta: str, params: dict) -> dict:
         raise MercadoError("No pude comunicarme con el proveedor de precios.") from exc
 
     datos = respuesta.json()
-    # Twelve Data contesta 200 con {"code": 4xx, "message": ...} en vez de un
-    # status HTTP de error, así que mirar respuesta.status_code no alcanza.
     if isinstance(datos, dict) and datos.get("code") and int(datos["code"]) >= 400:
         mensaje = str(datos.get("message", ""))
         if int(datos["code"]) == 429:
@@ -230,12 +160,11 @@ def _numero(valor: Any) -> float | None:
         n = float(valor)
     except (TypeError, ValueError):
         return None
-    return n if n == n else None  # descarta NaN
+    return n if n == n else None
 
 
 def _redondear(valor: float | None) -> float | None:
-    """Dos decimales. El proveedor manda cosas como 0.3778135, y siete
-    decimales en un porcentaje sugieren una precisión que el dato no tiene."""
+    """Dos decimales. El proveedor manda cosas como 0.3778135, y siete"""
     return None if valor is None else round(valor, 2)
 
 
@@ -254,8 +183,7 @@ async def _serie(simbolo: str) -> list[dict]:
 
 
 def _cierre_hace(serie: list[dict], ruedas: int) -> float | None:
-    """El cierre de hace N ruedas. Cuenta ruedas y no días de calendario: una
-    semana de mercado son 5, no 7, y un feriado no debe correr la referencia."""
+    """El cierre de hace N ruedas. Cuenta ruedas y no días de calendario: una"""
     if len(serie) <= ruedas:
         return None
     return _numero(serie[ruedas].get("close"))
@@ -279,8 +207,6 @@ async def _armar(simbolo: str, etiqueta: str) -> dict:
         "moneda": quote.get("currency"),
         "mercado": quote.get("exchange"),
         "variacion": {
-            # La diaria la da el propio proveedor: es contra el cierre anterior
-            # y no contra la apertura, que es lo que se entiende por "hoy".
             "dia": _redondear(_numero(quote.get("percent_change"))),
             "semana": _variacion(precio, _cierre_hace(serie, 5)),
             "mes": _variacion(precio, _cierre_hace(serie, 21)),
@@ -295,18 +221,8 @@ async def _armar(simbolo: str, etiqueta: str) -> dict:
     }
 
 
-# --------------------------------------------------------------------------
-# Data912 (papeles argentinos, sin clave)
-# --------------------------------------------------------------------------
-
-
 async def _rueda_argentina(lista: str) -> list[dict]:
-    """Una lista entera de Data912, cacheada como bloque.
-
-    Devuelve la rueda completa en un solo pedido, así que traer diez papeles
-    cuesta lo mismo que traer uno. No consume presupuesto: no tiene clave ni
-    límite publicado.
-    """
+    """Una lista entera de Data912, cacheada como bloque."""
     clave = f"arg:{lista}"
     if (previo := _guardado(clave)) and not previo[1]:
         return previo[0]
@@ -317,7 +233,7 @@ async def _rueda_argentina(lista: str) -> list[dict]:
         filas = respuesta.json()
     except (httpx.HTTPError, ValueError) as exc:
         if previo:
-            return previo[0]  # vencido, pero es lo que hay
+            return previo[0]
         raise MercadoError("No pude traer la rueda argentina.") from exc
 
     _guardar(clave, filas)
@@ -339,9 +255,6 @@ async def _buscar_argentino(ticker: str) -> dict | None:
                     "precio": _numero(fila.get("c")),
                     "moneda": "ARS",
                     "mercado": "BYMA",
-                    # Data912 solo da la variación del día. Semana y mes
-                    # quedan en null: es un dato que no tenemos, y rellenarlo
-                    # con cero diría "no se movió", que es distinto.
                     "variacion": {"dia": _numero(fila.get("pct_change")), "semana": None, "mes": None},
                     "rango_dia": {"min": None, "max": None},
                     "rango_52_semanas": {"min": None, "max": None},
@@ -351,23 +264,8 @@ async def _buscar_argentino(ticker: str) -> dict | None:
     return None
 
 
-# --------------------------------------------------------------------------
-# Lo que usan los endpoints
-# --------------------------------------------------------------------------
-
-
 async def precio(ticker: str, mercado: str = "us") -> dict:
-    """Precio y variaciones de una acción o CEDEAR.
-
-    `mercado` es OBLIGATORIO en la práctica aunque tenga default, porque el
-    mismo ticker puede ser dos activos distintos: AAPL es la acción de Apple en
-    NASDAQ a US$311 y también el CEDEAR de Apple en BYMA a $24.630. Elegir por
-    nuestra cuenta y no decirlo devolvería un número plausible y equivocado,
-    que es la peor clase de error para un precio.
-
-    - "us": Twelve Data. Gasta cuota.
-    - "ar": Data912, mercado argentino. No gasta cuota ni pide clave.
-    """
+    """Precio y variaciones de una acción o CEDEAR."""
     ticker = _limpiar_ticker(ticker)
     mercado = _limpiar_mercado(mercado)
 
@@ -401,17 +299,10 @@ async def precio(ticker: str, mercado: str = "us") -> dict:
 
 
 async def historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
-    """Serie de cierres diarios, del más viejo al más nuevo, para graficar.
-
-    Va en su propio endpoint y no dentro de /api/precio porque son ~90 puntos
-    por activo: pegarlos a cada consulta de precio engordaría la respuesta que
-    más se pide para servir a la pantalla que menos se abre.
-    """
+    """Serie de cierres diarios, del más viejo al más nuevo, para graficar."""
     ticker = _limpiar_ticker(ticker)
     mercado = _limpiar_mercado(mercado)
 
-    # El int() puede reventar con basura ("dias=abc"): se traduce a un 400, que
-    # es de quien llama, en vez de dejar salir un 500 que parece culpa nuestra.
     try:
         dias = max(7, min(int(dias or 90), 365))
     except (TypeError, ValueError) as exc:
@@ -440,8 +331,6 @@ async def historico(ticker: str, mercado: str = "us", dias: int = 90) -> dict:
             "moneda": (crudo.get("meta") or {}).get("currency"),
             "puntos": [
                 {"fecha": v.get("datetime"), "cierre": _numero(v.get("close"))}
-                # El proveedor los manda del más nuevo al más viejo; un gráfico
-                # se lee al revés, así que se invierten una sola vez acá.
                 for v in reversed(valores)
                 if _numero(v.get("close")) is not None
             ],
@@ -487,9 +376,6 @@ async def _historico_argentino(ticker: str, dias: int) -> dict:
     raise MercadoError(f"No hay histórico argentino para «{ticker}».")
 
 
-# Los índices se piden con el símbolo que usa cada proveedor. El "^" es la
-# convención de Yahoo y Twelve Data no lo quiere, así que se traduce acá en vez
-# de obligar a la web a saber de estas diferencias.
 INDICES = {
     "^GSPC": {"simbolo": "GSPC", "nombre": "S&P 500"},
     "GSPC": {"simbolo": "GSPC", "nombre": "S&P 500"},

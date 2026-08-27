@@ -1,9 +1,4 @@
-"""Respuestas fijas a saludos y comandos, resueltas sin pasar por Gemini.
-
-Un "hola" no tiene nada que interpretar: mandarlo al modelo sería pagar una
-llamada, y esperar un segundo, para que conteste que no entendió. Acá se
-resuelve con texto fijo antes de que el mensaje llegue al parser.
-"""
+"""Respuestas fijas a saludos y comandos, resueltas sin pasar por Gemini."""
 
 from __future__ import annotations
 
@@ -93,7 +88,6 @@ Las tasas se actualizan solas una vez por día.
 
 Todavía no puedo editar ni borrar movimientos ya cargados."""
 
-# Las claves van normalizadas: minúsculas, sin tildes y sin signos.
 _SALUDOS = frozenset(
     {
         "/start",
@@ -134,15 +128,11 @@ _AYUDA = frozenset(
     }
 )
 
-# Los signos no aportan nada para comparar: "¿qué podés hacer?" tiene que
-# entrar por la misma puerta que "que podes hacer".
 _SIGNOS = " ¡!¿?.,;:…\"'"
 
 
 def _normalizar(texto: str) -> str:
     """Baja a minúsculas, saca tildes y signos, y colapsa los espacios."""
-    # NFD separa cada letra de su tilde, y "Mn" (marca no espaciada) es
-    # justamente esa tilde suelta: descartándola queda la letra pelada.
     sin_tildes = "".join(
         caracter
         for caracter in unicodedata.normalize("NFD", texto.lower())
@@ -152,19 +142,9 @@ def _normalizar(texto: str) -> str:
 
 
 def respuesta_directa(texto: str) -> str | None:
-    """La respuesta fija que corresponde al mensaje, o None si no hay ninguna.
-
-    None significa "esto hay que interpretarlo": el mensaje sigue camino al
-    parser como siempre.
-
-    Compara el mensaje ENTERO y no su comienzo, a propósito. Con un `startswith`
-    un "hola, gasté 8 lucas en el súper" se comería el gasto y contestaría el
-    saludo. Así, un saludo con algo más atrás es un mensaje común y se
-    interpreta normal.
-    """
+    """La respuesta fija que corresponde al mensaje, o None si no hay ninguna."""
     clave = _normalizar(texto)
 
-    # En un grupo, Telegram manda "/start@Cuentia_Bot" en lugar de "/start".
     if clave.startswith("/"):
         clave = clave.split("@", 1)[0]
 

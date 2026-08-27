@@ -1,18 +1,4 @@
-"""Recomendaciones sobre los gastos, a partir de agregados y no de movimientos.
-
-Lo que entra acá ya viene sumado y contado por la web: totales por categoría,
-variaciones contra el período anterior, promedios y candidatos a cargo
-recurrente. Nunca entra el texto de los mensajes de Telegram ni la lista de
-movimientos uno por uno.
-
-Eso no es una formalidad: reduce lo que sale del navegador a unas decenas de
-números, hace la llamada barata y acotada, y deja el análisis sin material con
-el que reconstruir la vida de nadie. Gemini recibe "supermercado: 320.000,
-+18% contra el mes pasado", no "compré pañales el martes".
-
-La otra mitad del diseño está en la web (web/js/insights.js), que es la que
-calcula los agregados: acá solo se los interpreta.
-"""
+"""Recomendaciones sobre los gastos, a partir de agregados y no de movimientos."""
 
 from __future__ import annotations
 
@@ -30,21 +16,13 @@ logger = logging.getLogger(__name__)
 
 MODELO = "gemini-3.5-flash-lite"
 
-# Cliente propio y no el de parser.py: son dos usos distintos del mismo
-# proveedor y no conviene que un cambio de configuración en uno toque al otro.
 _cliente = genai.Client(api_key=GEMINI_API_KEY)
 
-# Tope de insights. Más que esto no es un panel, es un informe que nadie lee.
 MAX_INSIGHTS = 5
 
 
 class InsightsError(RuntimeError):
     """No se pudieron generar los insights."""
-
-
-# --------------------------------------------------------------------------
-# Lo que manda la web
-# --------------------------------------------------------------------------
 
 
 class CategoriaAgregada(BaseModel):
@@ -53,29 +31,19 @@ class CategoriaAgregada(BaseModel):
     categoria: str = Field(max_length=60)
     total: Decimal
     porcentaje: float = Field(description="Qué parte del gasto del período se lleva")
-    # None cuando la categoría no existía antes: no es un crecimiento del
-    # infinito por ciento, es una categoría nueva, y se dice distinto.
     variacion_pct: float | None = None
     total_anterior: Decimal | None = None
     promedio_mensual: Decimal | None = None
 
 
 class CargoRecurrente(BaseModel):
-    """Un cargo que se repite mes a mes por un monto parecido.
-
-    Lo detecta la web con una regla explícita (mismo concepto, monto similar,
-    varios meses seguidos). Acá llega como candidato, no como certeza: por eso
-    los insights hablan de "posible suscripción" y nunca afirman que lo sea.
-    """
+    """Un cargo que se repite mes a mes por un monto parecido."""
 
     concepto: str = Field(max_length=80)
     monto_tipico: Decimal
     veces: int
     meses_seguidos: int
     ultimo_mes: str = Field(max_length=7, description="AAAA-MM")
-    # Cuánto varía el importe entre repeticiones. Es lo que distingue un abono
-    # —siempre el mismo precio— de un gasto que solo se repite, como la compra
-    # semanal. Sin este dato los dos llegan iguales y el análisis los confunde.
     dispersion_pct: float = 0.0
     categoria: str | None = Field(default=None, max_length=60)
 
@@ -98,16 +66,10 @@ class AgregadosGastos(BaseModel):
     recurrentes: list[CargoRecurrente] = Field(default_factory=list, max_length=20)
 
 
-# --------------------------------------------------------------------------
-# Lo que devuelve Gemini
-# --------------------------------------------------------------------------
-
-
 class Insight(BaseModel):
     tipo: str = Field(description="ahorro | crecimiento | suscripcion | consejo")
     titulo: str = Field(max_length=70)
     detalle: str = Field(max_length=320)
-    # La categoría o concepto del que habla, para poder resaltarlo en la web.
     referencia: str | None = Field(default=None, max_length=80)
 
 
@@ -201,14 +163,8 @@ def _resumen_para_el_modelo(datos: AgregadosGastos) -> str:
 
 
 def generar(datos: AgregadosGastos) -> list[Insight]:
-    """Le pide a Gemini que interprete los agregados.
-
-    Raises:
-        InsightsError: si el modelo no responde o devuelve algo inutilizable.
-    """
+    """Le pide a Gemini que interprete los agregados."""
     if not datos.categorias:
-        # Sin categorías no hay nada que analizar, y preguntarle igual gastaría
-        # una llamada para que conteste que no sabe.
         return []
 
     try:

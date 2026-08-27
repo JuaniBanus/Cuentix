@@ -1,11 +1,4 @@
 // Paneles "Gastos recurrentes" y "Comparado con vos mismo", en Gastos.
-//
-// Los dos comparten una regla: no dicen qué hacer. El primero muestra qué se
-// está pagando todos los meses —dato que nadie tiene a mano— y ahí se detiene;
-// no sabe si el gimnasio al que no vas es un olvido o una decisión. El segundo
-// compara al usuario SOLO consigo mismo: nunca contra otros usuarios ni contra
-// promedios externos, porque comparar el gasto propio con el de un desconocido
-// no produce información, produce culpa.
 
 import { esc, monto, montosOcultos } from "../format.js";
 import { comparar, frase, MESES_PROMEDIO } from "../comparacion.js";
@@ -26,7 +19,6 @@ function fechaCortita(iso) {
   return `${Number(d)} ${nombres[Number(m) - 1]} ${a.slice(2)}`;
 }
 
-// -------------------------------------------------------- Recurrentes ----
 
 export function renderRecurrentes(contenedor, { historial, moneda, hoy }) {
   const seccion = document.createElement("section");
@@ -96,7 +88,6 @@ export function renderRecurrentes(contenedor, { historial, moneda, hoy }) {
   contenedor.append(seccion);
 }
 
-// --------------------------------------------- Comparación con vos mismo --
 
 export function renderComparacion(contenedor, { historial, delPeriodo, mesActual, moneda }) {
   const seccion = document.createElement("section");
@@ -115,7 +106,7 @@ export function renderComparacion(contenedor, { historial, delPeriodo, mesActual
     return;
   }
 
-  const claseDe = (v) => (v > 0 ? "es-baja" : "es-suba"); // gastar más no es bueno
+  const claseDe = (v) => (v > 0 ? "es-baja" : "es-suba");
 
   seccion.innerHTML = `
     <h2 class="tarjeta-titulo">📊 Comparado con vos mismo</h2>

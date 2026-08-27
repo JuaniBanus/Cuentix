@@ -1,15 +1,4 @@
 // Panel de administración: quién tiene cuenta y quién puede entrar.
-//
-// Es la ÚNICA pantalla de datos del superusuario. No muestra un peso de nadie
-// —ni podría: las policies restrictivas de migrations/014 le devuelven cero
-// filas de movimientos, objetivos e inversiones aunque pida directo a la API—.
-// Acá solo hay emails, estados y roles.
-//
-// LAS ALTAS NO SE HACEN DESDE ACÁ, y es a propósito. Crear un usuario necesita
-// la service_role, que no puede vivir en el navegador; hacerlo desde la web
-// pedía un endpoint nuevo en el bot, o sea más superficie para proteger. Se
-// hacen invitando desde Supabase, y este panel explica cómo. Lo que sí se hace
-// acá es lo de todos los días: activar y pausar.
 
 import { esc } from "../format.js";
 
@@ -92,9 +81,6 @@ function fila(usuario, perfil, guardandoUsuario) {
   const activo = estado === "activo";
   const guardando = guardandoUsuario === usuario.user_id;
 
-  // Pausar la cuenta propia dejaría el sistema sin ningún superusuario activo y
-  // sin forma de volver desde la web. La función admin_cambiar_estado lo
-  // rechaza igual; acá se saca el botón para no ofrecer algo que va a fallar.
   const boton = esUnoMismo
     ? `<span class="apunte">sos vos</span>`
     : `<button class="boton boton-chico" type="button"

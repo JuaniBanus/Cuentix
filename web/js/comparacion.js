@@ -1,23 +1,7 @@
 // Comparación con vos mismo: el período actual contra tu propio promedio.
-//
-// LA REGLA QUE ORDENA TODO EL ARCHIVO
-// Se compara al usuario SOLO consigo mismo. Nunca contra otros usuarios,
-// promedios del país, "gente como vos" ni ningún número externo. No es una
-// limitación técnica: comparar el gasto de alguien con el de un desconocido no
-// produce información útil sobre su situación, produce culpa o falsa
-// tranquilidad. Lo único que dice algo verdadero sobre si este mes fue caro es
-// cómo fueron los meses propios.
-//
-// CÓMO SE ARMA EL PROMEDIO
-// Los últimos 6 meses cerrados, SIN incluir el actual: incluirlo lo acercaría
-// a sí mismo y achataría la comparación justo cuando más se necesita. Un mes
-// sin datos no cuenta como cero —eso hundiría el promedio— y se informa sobre
-// cuántos meses se pudo calcular.
 
 export const MESES_PROMEDIO = 6;
-// Con menos de 2 meses, "tu promedio" es un mes suelto y no significa nada.
 const MESES_MINIMOS = 2;
-// Variaciones más chicas que esto son ruido, no una tendencia.
 const RUIDO = 0.05;
 
 function mesDe(iso) {
@@ -46,16 +30,10 @@ function sumaPorMes(movimientos, filtro) {
   return porMes;
 }
 
-/**
- * Compara un valor del mes actual contra el promedio de los meses previos.
- *
- * @returns {{actual, promedio, variacion, meses}|null} null si no alcanza la historia
- */
+/** Compara un valor del mes actual contra el promedio de los meses previos. */
 function contra(porMes, mesActual, actual) {
   const referencia = mesesDeReferencia(mesActual)
     .map((mes) => porMes.get(mes))
-    // Un mes sin el dato NO es un cero: es un mes que no se puede promediar.
-    // Contarlo como cero hundiría el promedio e inventaría una suba.
     .filter((v) => v !== undefined);
 
   if (referencia.length < MESES_MINIMOS) return null;
@@ -71,14 +49,7 @@ function contra(porMes, mesActual, actual) {
   };
 }
 
-/**
- * Todas las comparaciones de un período.
- *
- * @param {Array} historial TODOS los movimientos, no solo los del período
- * @param {Array} delPeriodo los del período que se está mirando
- * @param {string} mesActual "2026-08"
- * @param {string} moneda
- */
+/** Todas las comparaciones de un período. */
 export function comparar(historial, delPeriodo, mesActual, moneda) {
   const deLaMoneda = (historial ?? []).filter((m) => m.moneda === moneda);
   const actuales = (delPeriodo ?? []).filter((m) => m.moneda === moneda);
@@ -90,16 +61,12 @@ export function comparar(historial, delPeriodo, mesActual, moneda) {
   const ingresoActual = suma(actuales, "ingreso");
   const ahorroActual = suma(actuales, "ahorro");
 
-  // 1. Gasto total.
   const gasto = contra(
     sumaPorMes(deLaMoneda, (m) => m.tipo === "gasto"),
     mesActual,
     gastoActual
   );
 
-  // 2. Tasa de ahorro. Se compara la TASA y no el monto: ahorrar $50.000 con
-  // un sueldo de $500.000 no es lo mismo que con uno de $2.000.000, y el monto
-  // solo diría que cambió el sueldo.
   const porMesAhorro = sumaPorMes(deLaMoneda, (m) => m.tipo === "ahorro");
   const porMesIngreso = sumaPorMes(deLaMoneda, (m) => m.tipo === "ingreso");
   const tasas = new Map();
@@ -109,7 +76,6 @@ export function comparar(historial, delPeriodo, mesActual, moneda) {
   const tasaActual = ingresoActual > 0 ? ahorroActual / ingresoActual : null;
   const tasaAhorro = tasaActual === null ? null : contra(tasas, mesActual, tasaActual);
 
-  // 3. Por categoría. Solo las que el usuario tiene historia suficiente.
   const categorias = new Set(
     actuales.filter((m) => m.tipo === "gasto").map((m) => (m.categoria || "otros").trim())
   );
@@ -130,7 +96,6 @@ export function comparar(historial, delPeriodo, mesActual, moneda) {
     if (comparacion) porCategoria.push({ categoria, ...comparacion });
   }
 
-  // Lo que más se despegó primero: es lo que vale la pena mirar.
   porCategoria.sort((a, b) => Math.abs(b.variacion) - Math.abs(a.variacion));
 
   return { gasto, tasaAhorro, porCategoria: porCategoria.filter((c) => Math.abs(c.variacion) > RUIDO) };

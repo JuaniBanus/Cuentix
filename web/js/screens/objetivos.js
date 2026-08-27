@@ -1,9 +1,4 @@
 // Objetivos de ahorro: la lista y el formulario.
-//
-// El formulario es una vista de la pantalla, no una ventana flotante encima.
-// En un celular ocupa todo igual, y así no hay que resolver el foco atrapado,
-// el scroll bloqueado ni el fondo que se cierra al tocarlo: los tres bugs
-// clásicos de una hoja modal.
 
 import { esc, monto } from "../format.js";
 import { revisar as revisarFoto, url as urlDeFoto } from "../fotos.js";
@@ -17,9 +12,6 @@ const ETIQUETA_ESTADO = {
   completado: "completado ✅",
 };
 
-// --------------------------------------------------------------------------
-// Lista
-// --------------------------------------------------------------------------
 
 function tarjetaObjetivo({ objetivo, progreso, estado }) {
   const color = COLORES.includes(objetivo.color) ? `var(--${objetivo.color})` : "var(--cat-1)";
@@ -88,14 +80,7 @@ export function seccionObjetivos(objetivos, ahorros) {
     </section>`;
 }
 
-/**
- * Pone las fotos de las tarjetas.
- *
- * Va aparte del HTML porque cada URL firmada se pide de a una y es asíncrona:
- * la tarjeta se dibuja igual sin la foto y la imagen aparece cuando llega. Al
- * revés —esperar todas las firmas antes de pintar— dejaría la pantalla en
- * blanco por algo decorativo.
- */
+/** Pone las fotos de las tarjetas. */
 export function cargarFotos(contenedor) {
   for (const nodo of contenedor.querySelectorAll("[data-foto]")) {
     urlDeFoto(nodo.dataset.foto).then((url) => {
@@ -112,9 +97,6 @@ export function engancharObjetivos(contenedor, { abrirObjetivo }) {
   }
 }
 
-// --------------------------------------------------------------------------
-// Formulario
-// --------------------------------------------------------------------------
 
 const opciones = (valores, elegido, atributo) =>
   valores.map((v) => `
@@ -130,7 +112,6 @@ export function renderFormObjetivo(contenedor, ctx) {
         prioridad: "media", icono: ICONOS[0], color: COLORES[0], estado: "activo" }
     : objetivos.find((o) => o.id === vistaObjetivo);
 
-  // El objetivo se borró en otra pestaña, o el id quedó viejo.
   if (!objetivo) {
     contenedor.innerHTML = `<p class="vacio">Ese objetivo ya no está.</p>`;
     return;
@@ -248,11 +229,8 @@ export function renderFormObjetivo(contenedor, ctx) {
              </button>`}
       </section>`}`;
 
-  // ---- eventos ----
   const form = contenedor.querySelector("form");
 
-  // Los chips y las grillas son botones, no inputs: el valor elegido se lee de
-  // la clase al enviar, y tocarlos solo mueve el resaltado.
   for (const grupo of contenedor.querySelectorAll("[data-grupo]")) {
     for (const boton of grupo.querySelectorAll("button")) {
       boton.addEventListener("click", () => {
@@ -266,11 +244,8 @@ export function renderFormObjetivo(contenedor, ctx) {
   const elegido = (grupo, atributo) =>
     contenedor.querySelector(`[data-grupo="${grupo}"] .es-activo`)?.dataset[atributo] ?? null;
 
-  // La foto se maneja aparte del resto del formulario: es un archivo, no un
-  // valor de texto, y la subida es asíncrona. Se guarda acá cuál quedó elegida
-  // y el submit la manda como archivo, no como campo.
-  let fotoElegida = null;      // File nuevo, si se eligió uno
-  let fotoQuitada = false;     // se pidió borrar la que estaba
+  let fotoElegida = null;
+  let fotoQuitada = false;
 
   const vista = contenedor.querySelector("[data-vista-previa]");
   const aviso = contenedor.querySelector("[data-foto-estado]");
@@ -295,8 +270,6 @@ export function renderFormObjetivo(contenedor, ctx) {
     aviso.classList.remove("error");
     fotoElegida = archivo;
     fotoQuitada = false;
-    // Vista previa local: se muestra antes de subir nada, así se ve enseguida
-    // si eligió la imagen que quería.
     vista.style.backgroundImage = `url("${URL.createObjectURL(archivo)}")`;
     vista.classList.remove("es-vacia");
   });
@@ -316,7 +289,6 @@ export function renderFormObjetivo(contenedor, ctx) {
       descripcion: form.descripcion.value.trim() || null,
       monto_objetivo: form.monto_objetivo.value,
       moneda: elegido("moneda", "moneda"),
-      // Un date vacío es "": la columna espera null o una fecha, nunca "".
       fecha_estimada: form.fecha_estimada.value || null,
       prioridad: elegido("prioridad", "prioridad"),
       icono: elegido("icono", "icono"),

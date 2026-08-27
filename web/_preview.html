@@ -9,17 +9,6 @@
 </head>
 <body>
 
-<!-- Banco de pruebas de estilos con datos inventados: sirve para mirar las
-     pantallas sin loguearse.
-
-     Los íconos de las tabs se repiten acá abajo en chiquito. Es duplicación a
-     propósito: en pantalla grande la barra se va al costado y se queda solo
-     con los íconos, así que un banco sin ellos mostraría una franja vacía y no
-     serviría para revisar justo el layout que hay que revisar.
-
-     Los otros cuatro son los que usan las pantallas por dentro: el "+" de
-     objetivo nuevo, el "volver" de las vistas de detalle, la basura del
-     formulario y la salida de Usuario. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <g id="i-casa"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></g>
@@ -36,13 +25,6 @@
   </defs>
 </svg>
 
-<!-- El mismo envoltorio que index.html. No es decorativo: en pantalla grande es
-     el que se corre para dejarle lugar a la barra lateral, así que sin él el
-     banco mostraría el contenido por debajo de la barra. -->
-<!-- El encabezado con sus controles, igual que en index.html. No es decoración:
-     en pantalla grande el grupo entero se muda al pie de la barra lateral, así
-     que sin él acá el banco no serviría para revisar el menú, que es la mitad
-     de lo que hay que revisar. Los botones no hacen nada; están por la forma. -->
 <div id="vista-app">
 <header class="cabecera">
   <p class="marca">Cuentix</p>
@@ -72,9 +54,6 @@ import { marcarActiva, montarBarra } from "./js/barraSecciones.js";
 import { mes } from "./js/periodo.js";
 import { fijarCotizacion } from "./js/format.js";
 
-// Las mismas cinco secciones que TABS en router.js, sin las funciones de pintado
-// ni las banderas de datos: acá solo se necesita el nombre y el ícono. Importar
-// TABS arrastraría el router entero y con él el estado de la app de verdad.
 const TABS_PREVIEW = [
   { id: "inicio", nombre: "Inicio", icono: "i-casa" },
   { id: "gastos", nombre: "Gastos", icono: "i-gastos" },
@@ -83,9 +62,6 @@ const TABS_PREVIEW = [
   { id: "usuario", nombre: "Usuario", icono: "i-usuario", aparte: true },
 ];
 
-// En la app las fija app.js con lo que devuelve cotizaciones.js. Sin esto, la
-// distribución no se dibuja: sin una moneda común, un reparto porcentual entre
-// pesos y dólares no significaría nada.
 fijarCotizacion({
   venta: 1520,
   fecha: "2026-08-05T15:00:00.000Z",
@@ -94,9 +70,6 @@ fijarCotizacion({
   eurAproximado: false,
 });
 
-// Tenencias de ejemplo. Cubren los tres casos que la pantalla distingue:
-// cripto con precio de mercado (una en ganancia y otra en pérdida), activos sin
-// precio todavía, y dos monedas para que haya distribución por moneda.
 const inversiones = [
   {id:"a", tipo:"cripto", ticker:"BTC",  nombre:"Bitcoin",       cantidad:0.5,  precio_compra:60000, moneda:"USD", fecha_compra:"2026-03-12", sector:null},
   {id:"b", tipo:"cripto", ticker:"ETH",  nombre:"Ethereum",      cantidad:4,    precio_compra:3200,  moneda:"USD", fecha_compra:"2026-05-02", sector:null},
@@ -106,8 +79,6 @@ const inversiones = [
   {id:"f", tipo:"fci",    ticker:null,   nombre:"FCI Pellegrini", cantidad:1,   precio_compra:80000, moneda:"ARS", fecha_compra:"2026-06-15", sector:null},
 ];
 
-// Lo que devolvería CoinGecko. Fijos y no en vivo para que el preview se vea
-// igual siempre: BTC arriba de la compra, ETH abajo, para ver los dos colores.
 const precios = { BTC: 71500, ETH: 2740 };
 const movimientos = [
   {id:9, fecha:"2026-08-04", tipo:"gasto",   monto:8500,   moneda:"ARS", categoria:"comida",        descripcion:"pancho y coca"},
@@ -121,7 +92,6 @@ const movimientos = [
   {id:1, fecha:"2026-08-01", tipo:"gasto",   monto:4000,   moneda:"ARS", categoria:"ropa",          descripcion:"medias"},
 ];
 
-// Julio, para que Gastos tenga contra qué comparar.
 const previos = [
   {id:19, fecha:"2026-07-05", tipo:"gasto", monto:38000, moneda:"ARS", categoria:"servicios",    descripcion:"luz y gas"},
   {id:18, fecha:"2026-07-09", tipo:"gasto", monto:31000, moneda:"ARS", categoria:"supermercado", descripcion:"compra"},
@@ -129,9 +99,6 @@ const previos = [
   {id:16, fecha:"2026-07-20", tipo:"gasto", monto:9500,  moneda:"ARS", categoria:"comida",       descripcion:"delivery"},
 ];
 
-// Ahorros mira toda la historia, no solo el período. Dos de estos van imputados
-// a un objetivo: sin `objetivo_id` las barras de progreso quedarían todas en
-// cero y no se vería el formato real de la tarjeta.
 const historialDeAhorros = [
   {id:29, fecha:"2026-08-02", tipo:"ahorro", monto:50000, moneda:"ARS", categoria:"plazo fijo", descripcion:"pf", cuenta:"banco"},
   {id:28, fecha:"2026-06-05", tipo:"ahorro", monto:40000, moneda:"ARS", categoria:"plazo fijo", descripcion:"pf", cuenta:"banco"},
@@ -139,8 +106,6 @@ const historialDeAhorros = [
   {id:26, fecha:"2026-02-20", tipo:"ahorro", monto:18000, moneda:"ARS", categoria:"colchón", descripcion:"colchón", cuenta:null, objetivo_id:"o2"},
 ];
 
-// Los tres estados que la lista distingue: uno en curso, uno pasado de meta —que
-// se dibuja como completado— y uno en pausa.
 const objetivos = [
   {id:"o1", nombre:"Viaje a Japón", descripcion:"Dos semanas, en primavera", monto_objetivo:500000,
    moneda:"ARS", fecha_estimada:"2027-03-15", prioridad:"alta", icono:"✈️", color:"cat-1", estado:"activo"},
@@ -159,28 +124,17 @@ const pantallas = {
   usuario: renderUsuario,
 };
 
-// La pantalla se puede fijar por URL (?tab=gastos): así se pueden comparar
-// anchos sin tener que ir clickeando la barra en cada captura.
 let tab = new URLSearchParams(location.search).get("tab") ?? "inicio";
 if (!pantallas[tab]) tab = "inicio";
 let categoriaAbierta = null;
-// Las dos vistas de detalle del banco: el desglose de una categoría en Gastos y
-// el formulario de objetivo en Ahorros. Van acá y no adentro de pintar() por lo
-// mismo que en la app: redibujar la pantalla no puede perder dónde estabas.
 let vistaObjetivo = null;
 let confirmandoBorrado = false;
 
-// El mismo contexto que arma el router en la app de verdad.
 function pintar() {
-  // Lo mismo que hace router.js: es lo que el CSS usa para saber qué layout
-  // corresponde en pantalla grande.
   contenido.dataset.pantalla = tab;
 
-  // En el banco TODO pintado se anima, al revés que en la app: acá se viene
-  // justamente a mirar cómo entran las cosas, así que conviene que se repita en
-  // cada toque en vez de solo al cambiar de sección.
   contenido.classList.remove("es-nueva");
-  void contenido.offsetWidth; // fuerza el reflujo, si no la clase no se reinicia
+  void contenido.offsetWidth;
   contenido.classList.add("es-nueva");
   empezarPintado(true);
 
@@ -198,9 +152,6 @@ function pintar() {
     precios,
     errorPrecios: null,
     sinCotizar: [],
-    // El proxy del bot: le pone precio a lo que no es cripto. AL30 arriba de la
-    // compra y TSLA abajo, para que la lista muestre los dos colores. AAPL y el
-    // FCI quedan afuera a propósito: son el caso "sin cotización".
     preciosMercado: { "ar:AL30": { precio: 1310 }, "us:TSLA": { precio: 214 } },
     errorMercado: null,
     sinCoberturaMercado: ["AAPL"],
@@ -217,7 +168,6 @@ function pintar() {
     setCategoria: (c) => { categoriaAbierta = c; pintar(); },
     abrirObjetivo: (cual) => { vistaObjetivo = cual; confirmandoBorrado = false; pintar(); },
     pedirBorrado: (si) => { confirmandoBorrado = si; pintar(); },
-    // El banco no guarda ni borra nada: solo sirve para mirar cómo se ve.
     guardarObjetivo: () => {},
     borrarObjetivo: () => {},
     onSalir: () => {},
@@ -227,10 +177,7 @@ function pintar() {
   terminarPintado();
 }
 
-// La barra la monta el módulo de verdad, no una copia hecha a mano acá. Es la
-// pieza que más cambia entre tamaños —franja abajo, columna al costado, columna
-// que se abre— y una copia quedaría desincronizada al primer retoque, que es
-// justo cuando el banco tendría que servir para algo.
+
 const nav = document.querySelector(".tabs");
 montarBarra(nav, TABS_PREVIEW, (id) => {
   tab = id;

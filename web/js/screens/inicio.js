@@ -1,5 +1,4 @@
 // Pantalla Inicio: balance del período, dona de gastos, ingresos/ahorro y
-// los últimos movimientos.
 
 import { porMoneda, totalPorTipo, totalesPorCategoria } from "../cuentas.js";
 import { renderDona } from "../donut.js";
@@ -10,17 +9,6 @@ import { ultimoMesCerrado } from "../narrativa.js";
 import { acotar, chipsMoneda, engancharMonedas, listaMovimientos } from "./comunes.js";
 import { renderNarrativa } from "./narrativa.js";
 
-// --------------------------------------------------------------------------
-// Salud financiera
-// --------------------------------------------------------------------------
-//
-// Va en Inicio y no en Gastos porque el score mira toda la película —ingresos,
-// ahorro, colchón y objetivos—, no solo lo que sale. En Gastos se leería como
-// una nota sobre el gasto, que es apenas uno de sus cinco componentes.
-//
-// La tarjeta muestra el desglose completo por decisión, no por adorno: un
-// número sobre la propia plata sin decir de dónde sale no se puede discutir ni
-// corregir, y lo único que se puede hacer con él es creerlo.
 
 const DISCLAIMER_SALUD = `
   <p class="insights-aviso">
@@ -63,8 +51,6 @@ function tarjetaSalud(ctx, salud) {
     sube.length
       ? `<p class="salud-parrafo"><strong>Lo que lo sostiene:</strong> ${sube.map(esc).join(". ")}.</p>`
       : "",
-    // Que un componente no se pueda calcular cambia el score, así que se dice.
-    // Callarlo daría un número que parece completo sin serlo.
     falta.length
       ? `<p class="salud-parrafo salud-falta"><strong>Sin datos para:</strong>
            ${falta.map(esc).join("; ")}. Esos componentes quedan fuera del promedio.</p>`
@@ -89,9 +75,6 @@ function tarjetaSalud(ctx, salud) {
 
 export function renderInicio(contenedor, ctx) {
   const { movimientos, moneda, monedas, setMoneda, periodo } = ctx;
-  // La narrativa se agrega al cierre de la pantalla. Se define acá y se llama
-  // al final porque el innerHTML de más abajo borraría cualquier cosa que se
-  // escribiera antes.
   const alFinal = () =>
     renderNarrativa(contenedor, {
       narrativas: ctx.narrativas,

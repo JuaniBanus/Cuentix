@@ -1,15 +1,8 @@
 // Pantalla de login: formulario, errores y estado del botón.
-//
-// El login es una vista aparte de la app, no un panel encima: sin sesión no se
-// dibuja nada del dashboard.
 
 import { entrar } from "./data.js";
 
-/**
- * Engancha el formulario.
- *
- * @param {(sesion: object) => Promise<void>} alEntrar qué hacer con la sesión nueva
- */
+/** Engancha el formulario. */
 export function montarLogin(alEntrar) {
   const form = document.querySelector("#form-login");
   const error = document.querySelector("#login-error");
@@ -27,8 +20,6 @@ export function montarLogin(alEntrar) {
       form.password.value = "";
       await alEntrar(sesion);
     } catch (err) {
-      // El mensaje ya viene traducido desde data.js ("Email o contraseña
-      // incorrectos"), no el texto crudo de Supabase.
       error.textContent = err.message;
       form.password.focus();
       form.password.select();

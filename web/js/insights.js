@@ -1,32 +1,12 @@
 // Recomendaciones sobre los gastos.
-//
-// Este módulo hace dos cosas y conviene no mezclarlas:
-//
-// 1. AGREGAR: convierte la lista de movimientos en un puñado de números
-//    —totales por categoría, variaciones, promedios, cargos que se repiten—.
-//    Pasa todo acá, en el navegador, porque los movimientos ya están cargados
-//    y porque RLS ya decidió cuáles puede ver esta sesión.
-//
-// 2. PEDIR: le manda esos números al bot, que es quien habla con Gemini. La
-//    clave de Gemini no puede vivir en el navegador, igual que la service_role
-//    de Supabase: cualquiera la lee con Ctrl+U.
-//
-// Lo que sale de acá son montos y porcentajes, nunca la lista de movimientos
-// ni el texto de los mensajes de Telegram.
 
 import { BACKEND_URL } from "./config.js";
 import { sesionActual } from "./data.js";
 
-// Cuántos meses mira el análisis. Con dos no se distingue una suscripción de
-// una casualidad; con seis, un cargo mensual ya dejó rastro claro.
 export const MESES_ANALIZADOS = 6;
 
-// Dos cargos son "el mismo" si difieren menos que esto. Un abono ajusta por
-// inflación o cambia de precio: exigir el monto exacto perdería justo los que
-// más importa ver.
 const TOLERANCIA_MONTO = 0.15;
 
-// Con menos de tres apariciones no hay patrón, hay coincidencia.
 const MINIMO_APARICIONES = 3;
 
 /** "2026-08-04" -> "2026-08". */
@@ -37,8 +17,6 @@ function clave(texto) {
   return String(texto ?? "")
     .toLowerCase()
     .normalize("NFD")
-    // Clase con nombre y no un rango de combinantes literales: esos caracteres
-    // sueltos en el archivo son invisibles y cualquier reencodeo los rompe.
     .replace(/\p{Diacritic}/gu, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
@@ -51,22 +29,11 @@ const mediana = (numeros) => {
   return orden.length % 2 ? orden[medio] : (orden[medio - 1] + orden[medio]) / 2;
 };
 
-/**
- * Cargos que se repiten mes a mes por un monto parecido.
- *
- * Son CANDIDATOS, no suscripciones confirmadas: el alquiler y la cuota del gimnasio
- * también se repiten. Por eso lo que se manda dice "posible" y el panel sugiere
- * revisar, nunca afirma que haya que dar de baja algo.
- *
- * La mediana y no el promedio: un mes con recargo duplicado correría el promedio
- * y dejaría al resto de los cargos fuera de la tolerancia.
- */
+/** Cargos que se repiten mes a mes por un monto parecido. */
 export function detectarRecurrentes(gastos) {
   const grupos = new Map();
 
   for (const g of gastos) {
-    // La descripción ya es una etiqueta corta que guarda el bot, no el mensaje
-    // que escribió la persona. Si falta, la categoría alcanza para agrupar.
     const k = clave(g.descripcion) || clave(g.categoria);
     if (!k) continue;
     if (!grupos.has(k)) grupos.set(k, []);
@@ -82,22 +49,12 @@ export function detectarRecurrentes(gastos) {
     const tipico = mediana(items.map((g) => Math.abs(Number(g.monto))));
     if (!tipico) continue;
 
-    // Solo cuentan las apariciones cerca del monto típico: si los importes
-    // están por todos lados no es un abono, es una categoría de gasto suelto.
     const parecidos = items.filter(
       (g) => Math.abs(Math.abs(Number(g.monto)) - tipico) <= tipico * TOLERANCIA_MONTO
     );
     const mesesParecidos = [...new Set(parecidos.map((g) => mesDe(g.fecha)))].sort();
     if (mesesParecidos.length < MINIMO_APARICIONES) continue;
 
-    // Cuánto se mueve el importe alrededor de la mediana. Es lo que separa un
-    // abono de un gasto que simplemente se repite: Netflix cae al mismo precio
-    // todos los meses (dispersión ~0%), la compra del súper no (10-20%).
-    // Sin este número, "compra semanal" y "netflix" llegan indistinguibles.
-    //
-    // Se mide sobre TODAS las apariciones del concepto y no sobre `parecidos`:
-    // esa lista ya descartó lo que se aleja más de la tolerancia, así que
-    // medir ahí daría siempre un número chico y la señal no distinguiría nada.
     const dispersion =
       (items.reduce((t, g) => t + Math.abs(Math.abs(Number(g.monto)) - tipico), 0) /
         items.length /
@@ -115,7 +72,6 @@ export function detectarRecurrentes(gastos) {
     });
   }
 
-  // Los de mayor monto primero: es donde hay más plata en juego.
   return recurrentes.sort((a, b) => b.monto_tipico - a.monto_tipico).slice(0, 20);
 }
 
@@ -146,16 +102,7 @@ function porCategoria(gastos) {
 
 const redondear = (n) => Math.round(n * 100) / 100;
 
-/**
- * Arma el paquete de números que se le manda al análisis.
- *
- * @param {object} opciones
- * @param {Array} opciones.movimientos   los del período que se está mirando
- * @param {Array} opciones.previos       los del período anterior equivalente
- * @param {Array} opciones.historial     una ventana larga, para los recurrentes
- * @param {string} opciones.moneda
- * @param {string} opciones.etiquetaPeriodo  cómo nombrarlo en el texto
- */
+/** Arma el paquete de números que se le manda al análisis. */
 export function armarAgregados({
   movimientos,
   previos = [],
@@ -173,8 +120,6 @@ export function armarAgregados({
   const actuales = porCategoria(gastos);
   const anteriores = porCategoria(gastosPrevios);
 
-  // Promedio por categoría sobre la ventana larga, para poder decir si este
-  // mes se salió de lo habitual y no solo si subió contra el mes pasado.
   const mesesEnHistorial = new Set(gastosHistorial.map((g) => mesDe(g.fecha))).size || 1;
   const acumuladoHistorial = porCategoria(gastosHistorial);
 
@@ -187,8 +132,6 @@ export function armarAgregados({
         categoria,
         total: redondear(monto),
         porcentaje: total ? (monto / total) * 100 : 0,
-        // Sin gasto previo no hay variación posible: mandar 0 o 100 sería
-        // inventar. null le dice al modelo "esta categoría es nueva".
         variacion_pct: antes ? redondear(((monto - antes) / antes) * 100) : null,
         total_anterior: antes ? redondear(antes) : null,
         promedio_mensual: acumuladoHistorial[categoria]
@@ -219,13 +162,7 @@ export function armarAgregados({
 
 export class SinInsights extends Error {}
 
-/**
- * Le pide al bot que interprete los agregados.
- *
- * El token de la sesión va en la cabecera: al backend no le sirve para leer
- * datos —no lee ninguno—, solo para saber que quien llama es un usuario de la
- * app y no cualquiera gastando nuestra cuota de Gemini.
- */
+/** Le pide al bot que interprete los agregados. */
 export async function pedirInsights(agregados) {
   if (!BACKEND_URL) {
     throw new SinInsights("Falta configurar la dirección del backend en config.js.");
@@ -243,8 +180,6 @@ export async function pedirInsights(agregados) {
         Authorization: `Bearer ${sesion.access_token}`,
       },
       body: JSON.stringify(agregados),
-      // El backend duerme cuando no tiene tráfico y puede tardar en despertar.
-      // Sin este tope, el panel se quedaría "analizando" para siempre.
       signal: AbortSignal.timeout(90_000),
     });
   } catch (problema) {

@@ -1,11 +1,4 @@
 // Las cuentas sobre una lista de movimientos.
-//
-// Están separadas de data.js a propósito: son funciones puras, sin red ni
-// estado, y así se pueden probar sin levantar el cliente de Supabase.
-//
-// Se hacen en JavaScript y no con agregaciones en SQL, igual que el bot las
-// hace en Python: a escala de finanzas personales el costo es nulo y evita
-// depender de las funciones de agregación de PostgREST.
 
 import { sumar } from "./format.js";
 import { fechasDe } from "./periodo.js";
@@ -25,14 +18,7 @@ export function totalPorTipo(movimientos, tipo) {
   return sumar(movimientos.filter((m) => m.tipo === tipo));
 }
 
-/**
- * [{cuenta, total, porcentaje, sinDato}] para un tipo, de mayor a menor.
- *
- * El bot deja `cuenta` en null cuando el mensaje no dice dónde quedó la plata,
- * así que ese grupo existe casi siempre. Va último aunque sea el más grande:
- * "sin especificar" no es un lugar, y encabezando la lista se leería como si
- * fuera uno.
- */
+/** [{cuenta, total, porcentaje, sinDato}] para un tipo, de mayor a menor. */
 export function totalesPorCuenta(movimientos, tipo) {
   const delTipo = movimientos.filter((m) => m.tipo === tipo);
   const total = sumar(delTipo);
@@ -54,16 +40,7 @@ export function totalesPorCuenta(movimientos, tipo) {
     .sort((a, b) => a.sinDato - b.sinDato || b.total - a.total);
 }
 
-/**
- * Un punto por día del período, con lo del día y el acumulado.
- *
- * Los movimientos vienen ya filtrados por tipo y moneda: la serie no sabe de
- * gastos ni de ahorros, solo acumula lo que le den.
- *
- * Están todos los días, también los que no tuvieron movimientos: si se
- * saltearan, dos cargas separadas por dos semanas quedarían pegadas y la línea
- * mentiría sobre el ritmo.
- */
+/** Un punto por día del período, con lo del día y el acumulado. */
 export function serieAcumulada(movimientos, periodo, hoy = new Date()) {
   const porDia = new Map();
   for (const m of movimientos) {

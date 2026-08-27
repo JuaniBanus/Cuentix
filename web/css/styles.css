@@ -1,137 +1,61 @@
-/* Cuentix — dos temas sobre los mismos tokens. Mobile-first: columna angosta.
- *
- * Ningún color se escribe fuera de este bloque: todo lo que pinta usa una
- * variable. Cambiar de tema es cambiar este set, no repasar la hoja entera.
- *
- * Los tokens son semánticos (qué papel cumple el color), no descriptivos: por
- * eso --acento-tinta es un teal claro en oscuro y uno oscuro en claro. Si se
- * llamara --acento-claro, en tema claro diría exactamente lo contrario de lo
- * que hace.
- */
+/* Cuentix — dos temas sobre los mismos tokens. Mobile-first: columna angosta. */
 
 :root {
-  /* Una escala de radios, no un valor repetido. Que el recuadro grande y el
-     chiquito que lleva adentro tengan exactamente el mismo radio es lo que
-     delata una plantilla: cuando alguien lo dibuja a mano, el radio acompaña al
-     tamaño de la pieza. */
-  /* Radios de verdad grandes. 18px sobre una tarjeta de 340 de ancho es un
-     borde apenas matado: se ve "redondeado" solo si lo buscás. iOS usa 20 a
-     26 a esta escala, y ahí el redondeo pasa a ser una característica de la
-     forma en vez de un detalle. */
   --r-panel: 28px;
   --r-tarjeta: 22px;
   --r-boton: 14px;
   --r-pastilla: 999px;
-  /* Para piezas de 10 a 40px: avatares, puntos de leyenda, badges. Con
-     --r-boton se veían demasiado redondas a ese tamaño. */
   --r-mini: 8px;
 
-  /* ------------------------------------------------------------- Vidrio --
-     El desenfoque va en un token y no suelto en cada regla porque su costo es
-     real: cada superficie con backdrop-filter obliga al navegador a recomponer
-     lo que hay detrás. Centralizarlo permite bajarlo de un lugar si un celular
-     viejo se traba, y permite apagarlo entero con @supports.
-
-     La saturación importa tanto como el blur: es lo que da el color vivo del
-     vidrio de iOS. Solo desenfocar deja una superficie lechosa y apagada. */
   --vidrio-blur: blur(20px) saturate(180%);
   --vidrio-blur-suave: blur(16px) saturate(160%);
   --vidrio-blur-panel: blur(24px) saturate(180%);
 
-  /* Un pelo de línea, no un borde. En pantallas de alta densidad 0.5px se
-     dibuja de verdad; en el resto el navegador lo redondea a 1 y tampoco
-     molesta. */
   --hairline: .5px;
 
   --ancho: 480px;
   --alto-tabs: 62px;
 
-  /* Curva única para todo lo que se mueve. Arranque rápido y frenada larga: es
-     cómo se detiene algo que tiene masa. La curva por defecto del navegador
-     (ease) frena parejo y por eso se siente a "cambio de estado con retardo"
-     en vez de a movimiento. */
   --curva: cubic-bezier(.22, 1, .36, 1);
 }
 
-/* ------------------------------------------------- Tema oscuro (Nocturne) */
-/* Sin atributo también manda este: es el tema por defecto de la marca. */
 
 :root, :root[data-tema="oscuro"] {
   color-scheme: dark;
 
-  /* Los grises no son neutros: llevan la misma gota de teal que el logo. Un
-     gris puro al lado del acento se ve sucio, tirando a violáceo. */
   --fondo: #0b1f23;
   --superficie: #102a2e;
 
   --texto: #e9efee;
   --tenue: #8e9fa1;
-  /* Antes #75798c, que sobre la tarjeta daba 3.5:1 y dejaba los subtítulos de
-     12px por debajo del mínimo legible. Este llega a 4.9:1. */
   --tenue-2: #86979a;
 
-  /* El teal de marca. Es el mismo en los dos temas porque se usa de borde, y
-     para eso tiene que pasar 3:1 contra la tarjeta oscura Y contra la blanca:
-     4.4:1 y 3.5:1. Los tonos más lindos del logo fallan de un lado o del otro
-     —el teal profundo se hunde en el oscuro, la menta se lava en el blanco. */
   --acento: #1a97ad;
-  --acento-tinta: #6fd2e1;    /* acento cuando es texto o ícono */
+  --acento-tinta: #6fd2e1;
   --acento-suave: rgba(26, 151, 173, .18);
 
   --borde: rgba(233, 239, 238, .12);
   --borde-fuerte: rgba(233, 239, 238, .2);
 
-  /* Fondos de las superficies de vidrio. Van por tema porque el vidrio no es
-     un efecto puro: necesita un color abajo, y el que funciona sobre oscuro
-     deja la superficie sucia sobre claro.
-     Semitransparentes a propósito: si fueran opacos, el blur no se vería. */
   --vidrio: rgba(16, 42, 46, .72);
   --vidrio-nav: rgba(11, 31, 35, .78);
-  /* El borde del vidrio de Apple es una luz, no una línea: un blanco muy
-     tenue que simula el canto iluminado del panel. */
   --vidrio-borde: rgba(233, 239, 238, .14);
-  /* Los campos del login llevan borde propio: es lo único que dice dónde
-     empieza y termina el recuadro donde se escribe. */
   --borde-campo: rgba(233, 239, 238, .3);
   --realce: rgba(233, 239, 238, .05);
 
-  /* Profundidad. Una tarjeta del mismo tono plano que el fondo depende del borde
-     para existir; con un velo de luz cayendo sobre el filo de arriba y una
-     sombra abajo se despega sola, y entonces el borde puede aflojar.
-
-     --velo es la luz que baña la parte superior de la superficie y --luz-interna
-     es el filo mismo, de un píxel. Los dos juntos son lo que hace que se lea
-     como una superficie con canto y no como un rectángulo pintado; es el gesto
-     que más separa una app de finanzas cara de una plantilla. */
   --velo: rgba(233, 239, 238, .05);
   --luz-interna: inset 0 1px 0 rgba(233, 239, 238, .07);
 
-  /* El acento cuando tiene que brillar: la sección activa y el botón principal.
-     Va aparte de --acento-suave porque ese es un relleno y este es un halo. */
   --acento-halo: 0 0 0 1px rgba(26, 151, 173, .35), 0 6px 20px -8px rgba(26, 151, 173, .5);
 
-  /* La pasada de luz de los esqueletos de carga. Más marcada que --velo: ese es
-     un canto que tiene que pasar desapercibido y este tiene que verse moverse. */
   --brillo: rgba(233, 239, 238, .09);
 
   --error: #ff9a9a;
-  /* Ganancia y pérdida de las inversiones. No se usa --error para la baja:
-     una posición en rojo es un dato normal de la cartera, no una falla.
-     La suba se queda en verde y no toma la menta del logo: a 165° de tono
-     serían el mismo color, y "en ganancia" dejaría de leerse como un estado
-     para confundirse con la marca. El acento se fue al teal, a 188°. */
   --suba: #4fbf9f;
   --baja: #ff9a9a;
-  /* Antes acá decía `none`. Dos sombras y no una: la corta de arriba asienta la
-     tarjeta sobre el fondo y la larga y difusa de abajo es la que da la altura.
-     Una sola sombra media hace las dos cosas a medias y se ve a calco. */
   --sombra: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 26px -14px rgba(0, 0, 0, .7);
   --sombra-panel: 0 16px 40px rgba(0, 0, 0, .5);
 
-  /* Dona: seis tonos a la misma luminosidad, validados contra la tarjeta.
-     El primero es el de marca. Al pasar de violeta a cian quedó a 14° del azul
-     que había en --cat-5, o sea dos porciones vecinas indistinguibles: por eso
-     el azul se corrió a 216° y el violeta, que quedó libre, pasó a --cat-2. */
   --cat-1: #12a5bd;
   --cat-2: #9184d9;
   --cat-3: #c27405;
@@ -141,14 +65,11 @@
   --cat-otros: #78888a;
 }
 
-/* -------------------------------------------------------- Tema claro */
-/* No es el oscuro invertido: los tonos de la dona se rebajaron para que se
-   sostengan sobre blanco, y las tintas se oscurecieron hasta pasar 4.5:1. */
 
 :root[data-tema="claro"] {
   color-scheme: light;
 
-  --fondo: #eff3f3;           /* gris con una gota de teal, no blanco puro */
+  --fondo: #eff3f3;
   --superficie: #ffffff;
 
   --texto: #1c2b2d;
@@ -156,45 +77,26 @@
   --tenue-2: #5b7072;
 
   --acento: #1a97ad;
-  /* El teal de marca sobre blanco da 3.5:1: alcanza para un borde, no para una
-     cifra. Como texto va el teal profundo del logo, que llega a 6:1. */
   --acento-tinta: #0d6d7e;
   --acento-suave: rgba(26, 151, 173, .16);
 
   --borde: rgba(28, 43, 45, .12);
   --borde-fuerte: rgba(28, 43, 45, .34);
 
-  /* Sobre claro el vidrio va casi blanco y MÁS opaco: con la misma
-     transparencia que en oscuro, el texto de abajo se transparenta y la barra
-     se vuelve ilegible. */
   --vidrio: rgba(255, 255, 255, .78);
   --vidrio-nav: rgba(239, 243, 243, .82);
   --vidrio-borde: rgba(28, 43, 45, .1);
-  /* Más marcado que en oscuro: un campo blanco sobre un fondo casi blanco no se
-     distingue por el relleno, solo por el borde. Este llega a 3.4:1. */
   --borde-campo: rgba(28, 43, 45, .55);
   --realce: rgba(28, 43, 45, .05);
 
-  /* La profundidad se arma al revés que en oscuro. Ahí la luz cae sobre el filo
-     y lo aclara; acá la superficie ya es blanca, así que el filo se hace con
-     blanco puro contra el gris del fondo, y el que trabaja es el sombreado. Por
-     eso el velo es casi nada: oscurecer el tope de una tarjeta blanca la
-     ensuciaría en vez de darle canto. */
   --velo: rgba(28, 43, 45, .02);
   --luz-interna: inset 0 1px 0 rgba(255, 255, 255, .9);
   --acento-halo: 0 0 0 1px rgba(26, 151, 173, .3), 0 6px 18px -8px rgba(26, 151, 173, .35);
-  /* Blanco casi puro: sobre el gris del hueco vacío, una luz translúcida como la
-     del tema oscuro no se vería pasar. */
   --brillo: rgba(255, 255, 255, .75);
 
   --error: #b3261e;
-  /* Los mismos dos tonos rebajados hasta pasar 4.5:1 sobre la tarjeta blanca:
-     el verde del tema oscuro sobre blanco queda en 1.9:1, ilegible. */
   --suba: #16785e;
   --baja: #b3261e;
-  /* Tarjeta blanca sobre fondo casi blanco: sin una sombra mínima el borde de
-     la tarjeta desaparece. La segunda, larga y muy abierta, es la que la levanta
-     de la página. */
   --sombra: 0 1px 2px rgba(28, 43, 45, .07), 0 10px 24px -16px rgba(28, 43, 45, .35);
   --sombra-panel: 0 16px 40px rgba(28, 43, 45, .18);
 
@@ -209,20 +111,12 @@
 
 * { box-sizing: border-box; }
 
-/* El atributo hidden lo aplica el navegador con `display: none`, y CUALQUIER
-   regla de autor que fije display se lo come: `.login { display: grid }` hacía
-   que la pantalla de login se dibujara siempre, colgando debajo de la app.
-   Esta regla lo blinda para todo el documento. */
 [hidden] { display: none !important; }
 
 html, body {
   margin: 0;
   background: var(--fondo);
   color: var(--texto);
-  /* San Francisco primero. El orden importa más de lo que parece: con Inter
-     adelante, un iPhone se bajaba Inter por red para terminar mostrando algo
-     casi idéntico a la fuente que ya tenía instalada. Ahora en Apple gana SF
-     nativa y NO se descarga nada; en el resto sigue Inter, como antes. */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
                Inter, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
@@ -230,26 +124,20 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Los headings nunca pasan de 500, como pide la identidad. */
 h1, h2, h3 { font-weight: 500; margin: 0; letter-spacing: -.01em; }
 p { margin: 0; }
 ul { list-style: none; margin: 0; padding: 0; }
 
 button { font: inherit; color: inherit; cursor: pointer; }
 
-/* Un solo anillo de foco para todo lo que se puede tabular. Solo aparece con
-   teclado, nunca al hacer clic. */
 :where(button, a, input, [tabindex]):focus-visible {
   outline: 2px solid var(--acento-tinta);
   outline-offset: 2px;
 }
 
-/* Todo lo que sea un número lleva cifras de ancho fijo: sin esto, las columnas
-   de montos bailan de una fila a otra. */
 .cifra-heroe, .cifra-media, .movimiento-monto, .leyenda-monto, .leyenda-pct,
 .dona-centro-valor, .barra-monto, .barra-pct { font-variant-numeric: tabular-nums; }
 
-/* ------------------------------------------------------------------ Layout */
 
 .cabecera {
   position: sticky; top: 0; z-index: 10;
@@ -262,28 +150,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .marca { font-weight: 600; letter-spacing: -.02em; }
 
-/* Posicionado porque el panel del período cuelga de acá adentro. Antes colgaba
-   del encabezado; se metió adentro del grupo para que en pantalla grande los dos
-   se muden juntos a la barra de arriba. */
 .cabecera-acciones { position: relative; display: flex; gap: 6px; }
 
 .contenido {
   max-width: var(--ancho);
   margin: 0 auto;
-  /* Más aire: 22px de margen lateral y 24 entre bloques, contra 18 y 18.
-     El espaciado es la mitad de lo que hace que algo "se sienta Apple", y es
-     la mitad que nadie mira. Una interfaz apretada se lee como densa y
-     barata por más redondeos y vidrio que tenga encima. */
   padding: 4px 22px calc(var(--alto-tabs) + 32px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; gap: 24px;
 }
 
 .bloque { display: flex; flex-direction: column; gap: 4px; }
 
-/* El degradé no cubre la tarjeta entera: es un velo que se apaga a los 96px,
-   siempre a la misma distancia del filo de arriba. Un degradé al 100% del alto
-   haría que una tarjeta corta y una larga tuvieran pendientes distintas y se
-   vieran de dos materiales diferentes. */
 .tarjeta {
   background:
     linear-gradient(180deg, var(--velo), transparent 96px),
@@ -291,17 +168,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 1px solid var(--borde);
   border-radius: var(--r-tarjeta);
   box-shadow: var(--luz-interna), var(--sombra);
-  /* 20 en vez de 18: con el radio en 22, un relleno chico deja el contenido
-     metiéndose en la curva de la esquina. El padding tiene que acompañar al
-     redondeo o la tarjeta se ve apretada. */
   padding: 20px;
 }
 
-/* Large Title, el gesto más reconocible de iOS.
-   26px era un título discreto; 34 en negrita es una declaración. Es lo que
-   hace que la pantalla se lea como Ajustes de iPhone y no como una web con
-   un encabezado. El peso 700 no es capricho: SF y Inter recién a ese peso
-   dan el trazo grueso de los Large Title. */
 .pantalla-titulo {
   font-size: clamp(30px, 8vw, 34px);
   font-weight: 700;
@@ -310,32 +179,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
   margin: 6px 0 10px;
 }
 
-/* Dos niveles de rótulo, y son distintos a propósito. El título de tarjeta
-   nombra un bloque y va en tinta plena: es un encabezado. La .etiqueta de más
-   abajo rotula una cifra suelta y va en versalita apretada, que es el gesto que
-   dice "esto es la unidad, el número es lo que importa". Los dos en gris del
-   mismo tamaño —como estaban— dejaban la pantalla sin jerarquía. */
-/* Encabezado de sección estilo iOS: más chico, en gris y en versalita. En
-   Ajustes el título de un grupo no compite con su contenido, lo rotula. Que
-   estuviera en tinta plena y a 13.5 lo hacía pelear con las cifras de abajo. */
 .tarjeta-titulo {
   font-size: 12px; font-weight: 600;
   color: var(--tenue);
   letter-spacing: .04em; text-transform: uppercase;
   margin-bottom: 12px;
 }
-/* Padding parejo en los cuatro lados. Antes eran 15 arriba y abajo contra 16 a
-   los costados: un píxel que nadie ve de a una, pero puestas cuatro en fila se
-   nota que el aire de adentro no es el mismo en los dos ejes. */
 .tarjeta-mini { padding: 16px; display: flex; flex-direction: column; gap: 3px; }
 .grilla-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-/* ------------------------------------------------------------------- Texto */
 
-/* Versalita apretada: rotula la cifra que viene abajo sin competir con ella.
-   Es la convención de los productos financieros y no es un capricho de estilo:
-   en mayúscula chica el rótulo se lee como una unidad de medida, en minúscula
-   del mismo cuerpo se lee como una frase más. */
 .etiqueta {
   font-size: 11px; font-weight: 500;
   letter-spacing: .09em; text-transform: uppercase;
@@ -343,12 +196,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .apunte { font-size: 13px; color: var(--tenue-2); }
 
-/* clamp y no un tamaño fijo: es la cifra más larga de la app y en un teléfono
-   angosto un balance de siete dígitos se salía de la pantalla. Crece con el
-   ancho hasta 48 y ahí se planta, porque más grande deja de leerse como un
-   número y pasa a ser un cartel. */
-/* La cifra grande crece y engorda. Es el dato que la persona vino a ver, y en
-   una app de Apple el dato principal ocupa el espacio que se merece. */
 .cifra-heroe {
   font-size: clamp(42px, 12vw, 56px);
   font-weight: 700; letter-spacing: -.04em;
@@ -357,7 +204,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cifra-heroe.es-negativo { color: var(--acento-tinta); }
 .cifra-media { font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
 
-/* Para las tarjetas cuyo dato es un nombre de categoría y no un número. */
 .valor-texto {
   font-size: 16px; font-weight: 500; letter-spacing: -.01em;
   overflow-wrap: anywhere;
@@ -375,7 +221,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cargando { color: var(--tenue-2); padding: 40px 2px; }
 .error { color: var(--error); font-size: 13px; min-height: 18px; }
 
-/* Aviso de "no se pudo": ocupa el lugar del contenido, no lo tapa. */
 .aviso {
   display: flex; flex-direction: column; align-items: center;
   gap: 4px; text-align: center;
@@ -385,29 +230,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
     linear-gradient(180deg, var(--velo), transparent 96px),
     var(--superficie);
   border: 1px solid var(--borde);
-  /* Radio de panel y no de tarjeta: es el bloque más grande que puede aparecer
-     en la pantalla, y la escala manda que a más superficie, más curva. */
   border-radius: var(--r-panel);
   box-shadow: var(--luz-interna), var(--sombra);
 }
 .aviso-icono { width: 26px; height: 26px; color: var(--tenue); margin-bottom: 6px; }
 .aviso-titulo { font-weight: 500; }
-/* El botón acá no va a lo ancho: es una salida, no la acción principal. */
 .aviso-boton { width: auto; margin-top: 16px; padding: 9px 22px; }
 
-/* ----------------------------------------------------------------- Vidrio */
-/*
-   Se usa en CUATRO superficies y ninguna más: la barra de navegación (móvil y
-   escritorio), la tarjeta de balance y los paneles flotantes.
-
-   El límite no es estético sino de rendimiento. backdrop-filter obliga al
-   navegador a recomponer todo lo que hay detrás del elemento, y en una lista
-   de treinta movimientos con vidrio en cada fila el scroll se arrastra en
-   cualquier celular de gama media. Las superficies elegidas son o fijas (no
-   scrollean) o una sola por pantalla.
-
-   Regla que no se rompe: NUNCA vidrio dentro de vidrio. Duplica el costo y no
-   se distingue a simple vista. */
 
 .vidrio {
   background: var(--vidrio);
@@ -416,18 +245,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: var(--hairline) solid var(--vidrio-borde);
 }
 
-/* Sin soporte, el vidrio se vuelve una superficie sólida en vez de un panel
-   semitransparente que dejaría ver el texto de atrás. Firefox lo trae
-   desactivado por defecto en algunas versiones, así que esto no es un caso
-   teórico. */
 @supports not (backdrop-filter: blur(1px)) {
   .vidrio, .tabs, .barra-secciones, .panel {
     background: var(--superficie);
   }
 }
 
-/* Ahorro de datos: el usuario pidió que el dispositivo trabaje menos.
-   El blur es de lo más caro que hay en una interfaz. */
 @media (prefers-reduced-transparency: reduce) {
   .vidrio, .tabs, .barra-secciones, .panel {
     backdrop-filter: none;
@@ -436,16 +259,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
 }
 
-/* ---------------------------------------------------------------- Botones */
 
-/* Borde de acento sobre transparente: nunca rellenos sólidos de color. */
 .boton {
   display: block; width: 100%;
   padding: 12px 18px;
   background: transparent;
   border: 1px solid var(--borde-fuerte);
-  /* Cápsula: es la forma de botón de iOS. Con width:100% el radio grande no
-     deforma nada, solo redondea los extremos. */
   border-radius: var(--r-pastilla);
   font-weight: 500;
   letter-spacing: -.01em;
@@ -456,22 +275,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-color: var(--acento); color: var(--acento-tinta);
   background: var(--acento-suave);
 }
-/* El halo aparece recién al pasar el mouse: en reposo el botón es un borde de
-   acento, como manda la identidad. Encendido de entrada, cinco tarjetas con un
-   botón cada una serían cinco luces peleándose. */
 .boton-acento:hover:not(:disabled) { box-shadow: var(--acento-halo); }
-/* Un milímetro de hundimiento al apretar. Es lo que convierte un rectángulo
-   que cambia de color en algo que responde al dedo. */
 .boton:active:not(:disabled) { transform: translateY(1px); }
 .boton:disabled { opacity: .5; cursor: default; }
 
-/* El toque de iOS: al presionar, el control se apaga y se achica apenas.
-   Solo donde NO hay mouse. En desktop el hover ya da la respuesta y sumar
-   esto haría que cada clic parpadee.
-
-   Es lo que más "se siente Apple" de todo el rediseño, y no tiene nada que
-   ver con la forma: es la respuesta inmediata al dedo. Por eso son 90ms —más
-   lento se lee como animación, y una animación llega tarde. */
 @media (hover: none) {
   .boton:active:not(:disabled),
   .boton-icono:active:not(:disabled),
@@ -489,7 +296,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .boton-con-icono:hover { color: var(--texto); border-color: var(--borde-fuerte); }
 
-/* Volver del detalle de una categoría. Sin recuadro: es navegación, no acción. */
 .boton-volver {
   display: inline-flex; align-items: center; gap: 4px;
   align-self: flex-start;
@@ -508,7 +314,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 36px; height: 36px;
   background: transparent;
   border: 1px solid var(--borde);
-  /* Círculo, como los controles de la barra de iOS. */
   border-radius: var(--r-pastilla);
   color: var(--tenue);
   transition: color .15s var(--curva), border-color .15s var(--curva),
@@ -518,7 +323,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .boton-icono.es-activo { color: var(--acento-tinta); border-color: var(--acento); }
 .boton-icono:disabled { opacity: .4; cursor: default; }
 .boton-icono:disabled:hover { color: var(--tenue); }
-/* El de dólares lleva texto en vez de ícono. */
 .boton-icono.es-texto { width: auto; padding: 0 9px; font-size: 11.5px; font-weight: 600; }
 
 .icono {
@@ -528,16 +332,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: stroke-width .2s var(--curva);
 }
 
-/* La sección activa engorda apenas el trazo, como hacen los SF Symbols al
-   pasar de regular a medium. Es más sutil que un cambio de color y se lee
-   incluso para quien no distingue el acento del gris. */
 .tab.es-activo .icono { stroke-width: 1.9; }
 
 .chips { display: flex; gap: 6px; margin-bottom: 12px; }
-/* Pastilla y no rectángulo redondeado, al revés que los meses del panel. La
-   diferencia es deliberada: el chip es un filtro que se enciende y apaga, el mes
-   es una celda de una grilla. Darles la misma forma a los dos es el atajo que
-   hace que una interfaz se vea generada. */
 .chip {
   padding: 5px 13px;
   background: transparent;
@@ -554,7 +351,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--acento-suave);
 }
 
-/* -------------------------------------------------------- Selector de período */
 
 .boton-periodo {
   display: inline-flex; align-items: center; gap: 6px;
@@ -569,21 +365,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .boton-periodo:hover { color: var(--texto); }
 .boton-periodo[aria-expanded="true"] { color: var(--acento-tinta); border-color: var(--acento); }
 .boton-periodo .icono { width: 16px; height: 16px; flex: none; }
-/* Un rango largo no puede empujar al ojo fuera de la pantalla. */
 .boton-periodo span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Colgado del grupo de acciones, que es su ancla. El desplazamiento de 10px
-   compensa lo que antes ponía el padding del encabezado: el grupo termina más
-   arriba que la franja que lo contenía, así que sin esto el panel subiría y se
-   pegaría a los botones. */
 .panel {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 20;
   width: min(304px, calc(100vw - 36px));
   padding: 16px;
-  /* Vidrio más marcado que la nav: el panel FLOTA sobre el contenido, y ahí
-     el desenfoque cumple una función real —despegarlo del fondo— en vez de
-     ser decoración. Es una sola superficie y aparece a pedido, así que el
-     costo no se paga en el scroll. */
   background:
     linear-gradient(180deg, var(--velo), transparent 96px),
     var(--vidrio);
@@ -613,7 +400,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: color .15s, border-color .15s;
 }
 .mes:hover { color: var(--texto); }
-/* El mes en curso se marca aunque no sea el elegido: ubica al que se fue lejos. */
 .mes.es-hoy { border-color: var(--borde-fuerte); color: var(--texto); }
 .mes.es-activo {
   color: var(--acento-tinta);
@@ -623,7 +409,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .panel-rango .campo { margin-bottom: 12px; }
 
-/* ------------------------------------------------------------------ Barras */
 
 .barras { display: flex; flex-direction: column; gap: 4px; }
 .barra {
@@ -632,10 +417,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 7px 0;
 }
 
-/* La barra como botón: abre el detalle de la categoría. */
 .barra-tocable {
-  /* El margen negativo hace que el resaltado del toque llegue hasta el borde
-     interno de la tarjeta, en vez de cortarse a media pulgada. */
   margin: 0 -8px;
   width: calc(100% + 16px);
   padding: 8px;
@@ -657,16 +439,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .barra-relleno { display: block; height: 100%; border-radius: 4px; }
 .barra-pct { font-size: 13px; color: var(--tenue-2); text-align: right; }
-/* "sin especificar" no es un lugar: se muestra apagado para que no compita con
-   los que sí lo son. */
 .barra-nombre.es-tenue { color: var(--tenue-2); }
 
 .tarjeta-pie { margin-top: 12px; }
 
-/* -------------------------------------------------------- Salud financiera */
 
-/* Bandas del score. --suba ya existe para las inversiones y es el mismo verde
-   de "esto va bien", así que se reusa en vez de inventar un segundo verde. */
 .es-buena { color: #6aa84f; }
 .es-media { color: #c27405; }
 :root[data-tema="claro"] .es-buena { color: #3d7328; }
@@ -675,8 +452,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gauge { position: relative; margin: 4px auto 0; max-width: 200px; }
 .gauge-svg { display: block; width: 100%; height: auto; overflow: visible; }
 .gauge-pista { stroke: var(--realce); }
-/* El arco hereda el color de la banda (.es-suba, .es-buena…) en vez de tenerlo
-   fijo: así el color del medidor y el del número no se pueden desincronizar. */
 .gauge-relleno { stroke: currentColor; transition: stroke-dasharray .5s ease-out; }
 
 .gauge-centro {
@@ -687,8 +462,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gauge-escala { font-size: 11px; color: var(--tenue-2); }
 .gauge-banda { margin-top: 6px; text-align: center; font-size: 14px; font-weight: 500; }
 
-/* Va centrado y pegado al medidor, no al pie de la tarjeta: la advertencia
-   sirve si se lee junto al número, no después del desglose. */
 .salud-parcial {
   margin-top: 4px; text-align: center;
   font-size: 11.5px; color: var(--tenue-2);
@@ -699,8 +472,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   margin-top: 18px; padding-top: 14px;
   border-top: 1px solid var(--borde);
 }
-/* Cuatro columnas arriba y el detalle ocupando el ancho abajo: el nombre y el
-   puntaje se comparan en vertical, y la frase no rompe esa alineación. */
 .salud-fila {
   display: grid;
   grid-template-columns: 1fr 72px auto auto;
@@ -723,7 +494,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .salud-parrafo strong { color: var(--texto); font-weight: 500; }
 .salud-falta { color: var(--tenue-2); }
 
-/* --------------------------------------------------------------- Insights */
 
 .insights { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .insight {
@@ -750,9 +520,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .insights-cargando .apunte-tenue { display: block; margin-top: 3px; font-size: 12.5px; }
 .insights-error { color: var(--error); font-size: 13.5px; margin-bottom: 10px; }
 
-/* El aviso va tenue pero legible: tiene que poder leerse sin esfuerzo, no
-   esconderse. Por eso usa --tenue-2, que pasa 4.5:1 en los dos temas, y no un
-   gris más apagado. */
 .insights-aviso {
   margin-top: 12px; padding: 9px 11px;
   border-left: 2px solid var(--borde-fuerte);
@@ -769,7 +536,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--tenue);
 }
 
-/* ------------------------------------------------------------ Inversiones */
 
 .es-suba { color: var(--suba); }
 .es-baja { color: var(--baja); }
@@ -777,8 +543,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .apunte-tenue { color: var(--tenue-2); }
 .titulo-nota { color: var(--tenue-2); font-weight: 400; }
 
-/* Lo que la pantalla no pudo valuar. Va en una caja y no suelto porque es una
-   salvedad sobre las cifras de arriba, no un dato más. */
 .nota-precios {
   padding: 10px 12px;
   background: var(--superficie);
@@ -800,9 +564,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .posicion-marca {
   display: grid; place-items: center;
   width: 40px; height: 40px;
-  /* --r-mini y no --r-boton: al subir la escala, 12px sobre una pieza de 40
-     la dejaba casi circular y competía con los botones redondos de la barra.
-     El radio acompaña al tamaño. */
   border-radius: var(--r-mini);
   background: var(--acento-suave);
   border: 1px solid var(--borde);
@@ -825,15 +586,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .posicion-valor { font-size: 14.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .posicion-gp { font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .posicion-pct { opacity: .8; }
-/* Subrayado punteado y cursor de ayuda: lo que falta es el precio, y el title
-   explica por qué. Sin la marca, "sin precio aún" parece un error. */
 .posicion-gp.es-sin-dato {
   color: var(--tenue-2); font-style: italic;
   border-bottom: 1px dotted var(--borde-fuerte); cursor: help;
 }
 
-/* Precio guardado: se ve, pero apagado. Es un dato válido con una salvedad,
-   no un error ni una cifra de primera línea. */
 .posicion-vieja { color: var(--tenue-2); font-style: italic; opacity: .9; }
 
 .posicion-grafico {
@@ -846,7 +603,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .posicion-grafico:hover { color: var(--acento-tinta); border-color: var(--acento); }
 
-/* ------------------------------------------------- Gráfico de precio */
 
 .precio-grafico { display: flex; flex-direction: column; gap: 6px; }
 .precio-cabecera { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -854,8 +610,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .precio-var { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; }
 .precio-var .apunte-tenue { display: block; font-size: 11.5px; }
 
-/* La altura es fija y el ancho se estira: preserveAspectRatio="none" deforma
-   el trazo, y por eso la línea lleva vector-effect para no engordar con él. */
 .precio-svg {
   display: block; width: 100%; height: 120px;
   cursor: crosshair; touch-action: none;
@@ -870,7 +624,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 11.5px; color: var(--tenue-2);
 }
 
-/* -------------------------------------------------------------- Objetivos */
 
 .tarjeta-cabecera {
   display: flex; align-items: center; justify-content: space-between;
@@ -882,8 +635,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .objetivos { display: flex; flex-direction: column; gap: 2px; }
 
-/* Una grilla de dos columnas: el ícono a la izquierda ocupando todas las
-   filas, y el resto apilado a la derecha. */
 .objetivo {
   display: grid;
   grid-template-columns: 36px 1fr auto;
@@ -897,7 +648,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   transition: background .15s;
 }
 .objetivo:hover { background: var(--realce); }
-/* Terminado: sigue a la vista pero deja de pedir atención. */
 .objetivo.es-completado { opacity: .62; }
 
 .objetivo-icono {
@@ -914,7 +664,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .objetivo-cifras { grid-column: 2; font-size: 13px; }
 .objetivo-pie { grid-column: 2 / 4; font-size: 12px; }
 
-/* Tejuelo: la etiquetita de prioridad y estado. */
 .tejuelo {
   padding: 2px 7px;
   border: 1px solid var(--borde);
@@ -922,10 +671,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--tenue-2); font-size: 10.5px; font-weight: 500;
   white-space: nowrap;
 }
-/* Solo la prioridad alta se marca. Pintar las tres sería no marcar ninguna. */
 .tejuelo-alta { color: var(--acento-tinta); border-color: var(--acento); }
 
-/* ------------------------------------------------- Formulario de objetivo */
 
 .form-objetivo { display: flex; flex-direction: column; }
 .form-objetivo .campo { margin-bottom: 15px; }
@@ -955,8 +702,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 30px; height: 30px;
   border: 2px solid transparent;
   border-radius: 50%;
-  /* El anillo del color de la superficie separa el borde de acento del relleno,
-     para que se vea cuál está elegido también en el tema claro. */
   box-shadow: 0 0 0 2px var(--superficie) inset;
 }
 .color-opcion.es-activo { border-color: var(--texto); }
@@ -965,7 +710,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .confirmar { display: flex; flex-direction: column; gap: 10px; }
 .confirmar-botones { display: flex; gap: 8px; }
 
-/* ------------------------------------------------------------------ Línea */
 
 .linea-lectura {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
@@ -975,13 +719,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .linea-svg {
   display: block; width: 100%; height: auto;
-  overflow: visible; /* el punto del último día se sale del viewBox */
-  touch-action: pan-y; /* recorrer el gráfico no puede trabar el scroll */
+  overflow: visible;
+  touch-action: pan-y;
 }
 .linea-svg:focus-visible { outline: 2px solid var(--acento-tinta); outline-offset: 4px; }
 
-/* Un tono por encima de la superficie y sólida: punteada se leería como
-   "proyección" cuando es apenas una referencia. */
 .linea-grilla { stroke: var(--borde); stroke-width: 1; }
 
 .linea-trazo {
@@ -989,12 +731,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   stroke: var(--cat-1);
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
-/* Un lavado, nunca un bloque saturado. */
 .linea-area { fill: var(--cat-1); fill-opacity: .1; stroke: none; }
 
 .linea-cruz { stroke: var(--borde-fuerte); stroke-width: 1; }
-/* El anillo del color de la superficie mantiene el punto legible donde cruza
-   la línea. */
 .linea-punto { fill: var(--cat-1); stroke: var(--superficie); stroke-width: 2; }
 
 .linea-eje {
@@ -1003,15 +742,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 11px; color: var(--tenue-2);
 }
 
-/* ------------------------------------------------------------------- Dona */
 
 .dona-figura { position: relative; width: 100%; max-width: 240px; margin: 0 auto; }
 .dona { width: 100%; height: auto; display: block; }
 
 .dona-gajo {
   fill: none;
-  /* La separación entre gajos es del color de la superficie: dos categorías
-     contiguas nunca se tocan. */
   stroke-linecap: butt;
   cursor: pointer;
   transition: stroke-width .18s, opacity .18s;
@@ -1044,36 +780,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .leyenda-monto { font-size: 14px; font-weight: 500; }
 .leyenda-pct { font-size: 13px; color: var(--tenue-2); text-align: right; }
 
-/* ----------------------------------------------------------- Movimientos */
 
-/* Lista agrupada, como Ajustes de iOS: las filas viven DENTRO de un contenedor
-   redondeado en vez de flotar sueltas sobre el fondo.
-
-   Es el cambio que más se nota de todo el rediseño, y no tiene nada de
-   efectista. Una lista de filas con línea abajo se lee como una tabla; la
-   misma lista metida en un bloque con esquinas redondas se lee como una
-   pieza, y esa es la diferencia entre "web" y "app nativa". */
 .movimientos {
   display: flex; flex-direction: column;
   margin-top: 10px;
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: var(--r-tarjeta);
-  /* Recorta las esquinas de la primera y la última fila sin tener que
-     redondearlas a mano. */
   overflow: hidden;
 }
 
 .movimiento {
   display: grid; grid-template-columns: 34px 1fr auto;
   align-items: center; gap: 12px;
-  /* Filas más altas y con sangría lateral: el aire de iOS. */
   padding: 13px 14px;
   border-bottom: var(--hairline) solid var(--borde);
 }
-/* El separador NO llega al borde: arranca donde arranca el texto, alineado
-   con el avatar. Ese detalle —la sangría del separador— es una de las firmas
-   visuales de las listas de iOS. */
 .movimiento:not(:last-child) {
   background-image: linear-gradient(var(--borde), var(--borde));
   background-size: calc(100% - 60px) var(--hairline);
@@ -1099,7 +821,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .movimiento-monto { font-size: 14.5px; font-weight: 500; }
 .movimiento-monto.es-ingreso { color: var(--acento-tinta); }
 
-/* --------------------------------------------------- Termómetro de precios */
 
 .termo { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1138,14 +859,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 12.5px; color: var(--tenue-2); line-height: 1.4;
 }
 
-/* La nota final va separada del resto: es la letra chica de todo el bloque. */
 .termo-nota {
   margin-top: 16px; padding-top: 12px;
   border-top: 1px solid var(--borde);
   line-height: 1.5;
 }
 
-/* ------------------------------------------------------------ Patrimonio */
 
 .patrimonio { display: flex; flex-direction: column; gap: 4px; }
 .patrimonio-cifras { margin: 6px 0 2px; }
@@ -1167,15 +886,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-variant-numeric: tabular-nums;
 }
 
-/* -------------------------------------------------------------- Narrativa */
 
 .narrativa { display: flex; flex-direction: column; gap: 6px; }
 .narrativa-mes {
   font-size: 12px; color: var(--tenue-2);
   text-transform: capitalize; letter-spacing: .01em;
 }
-/* Un poco más de aire y de altura de línea que el resto: es el único bloque
-   de la app que se lee como texto corrido y no como dato. */
 .narrativa-texto { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 10px; }
 .narrativa-texto p { font-size: 14.5px; line-height: 1.65; }
 
@@ -1190,13 +906,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   text-transform: capitalize;
 }
 
-/* ------------------------------------------------------------------ Retos */
 
 .reto-activo { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
 .reto-nombre { font-size: 15px; font-weight: 500; }
 .reto-logros { margin-top: 8px; }
 
-/* ----------------------------------------------------- Foto en objetivos */
 
 .foto-campo { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
 .foto-acciones { display: flex; flex-direction: column; gap: 6px; flex: 1; }
@@ -1210,12 +924,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background-size: cover; background-position: center;
   background-color: var(--superficie);
 }
-/* Sin foto, un marco punteado en vez de un cuadrado vacío: se lee como "acá
-   va algo" y no como un error de carga. */
 .foto-vista.es-vacia { border-style: dashed; border-color: var(--borde-fuerte); }
 
-/* La foto en la tarjeta va de fondo, detrás del contenido, con un velo que
-   garantiza que el texto se siga leyendo por clara que sea la imagen. */
 .objetivo.tiene-foto { position: relative; overflow: hidden; isolation: isolate; }
 .objetivo-foto {
   position: absolute; inset: 0; z-index: -1;
@@ -1227,11 +937,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: linear-gradient(to right, var(--superficie) 30%, transparent);
 }
 
-/* ------------------------------------ Bloque de balance (Inicio) ---------- */
-/*
-   La única tarjeta de contenido con vidrio, y por eso mismo destaca: si lo
-   tuvieran todas, el efecto dejaría de señalar nada. Es una sola por pantalla
-   y no scrollea sola, así que el costo es acotado. */
 .bloque-heroe {
   background: var(--vidrio);
   backdrop-filter: var(--vidrio-blur-suave);
@@ -1242,21 +947,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   box-shadow: var(--luz-interna);
 }
 
-/* ------------------------------------------ Transición entre pantallas ---- */
-/*
-   El cambio de sección era un corte seco. Ahora entra con un desplazamiento
-   corto y un fundido, con la misma curva que el resto de la app.
-
-   8px y no más: un desplazamiento largo se lee como "la página se está
-   cargando" y agrega espera percibida a algo que es instantáneo. La idea es
-   que el contenido parezca haber estado siempre ahí, no que viaje. */
 @media (prefers-reduced-motion: no-preference) {
   .contenido.entrando > * {
     animation: entrar-seccion .22s var(--curva) both;
   }
-  /* Escalonado mínimo entre los primeros bloques: da la sensación de que la
-     pantalla se arma en vez de aparecer de golpe. Solo los tres primeros;
-     más allá el usuario ya está leyendo y el retardo molesta. */
   .contenido.entrando > *:nth-child(2) { animation-delay: 30ms; }
   .contenido.entrando > *:nth-child(3) { animation-delay: 60ms; }
 }
@@ -1266,12 +960,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   to   { opacity: 1; transform: none; }
 }
 
-/* ------------------------------------------------------- Análisis del dólar */
 
 .dolar { display: flex; flex-direction: column; gap: 4px; }
 
-/* La lectura va antes que la tabla: siete cotizaciones con dos precios son
-   catorce números, y nadie viene a leer una planilla. */
 .dolar-analisis { font-size: 14.5px; line-height: 1.6; margin-bottom: 12px; }
 
 .dolar-brechas { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
@@ -1304,7 +995,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   text-align: left;
   transition: background .15s var(--curva);
 }
-/* El separador arranca donde arranca el texto, como en las listas de iOS. */
 .dolar-fila:not(:last-child) .dolar-boton {
   box-shadow: inset 0 calc(var(--hairline) * -1) 0 var(--borde);
 }
@@ -1329,14 +1019,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dolar-grafico { margin-top: 6px; }
 .dolar-linea { width: 100%; height: auto; display: block; overflow: visible; }
 
-/* --------------------------------------------- Rendimientos de billeteras */
-/*
- * Misma tabla-lista que el dólar, con una columna más: acá cada fila tiene que
- * decir tres cosas (quién, qué tasa, cuánto ganás) contra las dos de allá.
- *
- * La fecha va arriba de todo y no al pie con la letra chica de la fuente. Es el
- * único dato que delata que el cron se rompió, y al pie no la mira nadie.
- */
 
 .rend-fecha {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
@@ -1344,8 +1026,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-size: 13px; color: var(--tenue);
 }
 .rend-fecha strong { color: var(--texto); font-weight: 600; }
-/* Ámbar y no rojo: las tasas viejas siguen siendo utilizables, solo hay que
-   mirarlas con desconfianza. El rojo diría "esto está roto". */
 .rend-fecha.es-vieja { color: #d8a24a; }
 .rend-fecha.es-vieja strong { color: #d8a24a; }
 .rend-alerta { color: #d8a24a; margin-bottom: 12px; line-height: 1.5; }
@@ -1357,8 +1037,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-radius: var(--r-boton);
 }
 .rend-label { font-size: 13.5px; color: var(--tenue); }
-/* Se va al final de la fila para que "Si pongo [ $ ___ ] gano por mes" se lea
-   como una frase y no como un formulario con dos etiquetas sueltas. */
 .rend-label-fin { margin-left: auto; }
 
 .rend-input-grupo {
@@ -1381,8 +1059,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font: inherit; font-size: 15px; font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* Las flechitas del number roban ancho y en mobile no se usan. El input queda
-   como number igual por el teclado numérico que abre. */
 .rend-input::-webkit-outer-spin-button,
 .rend-input::-webkit-inner-spin-button { appearance: none; margin: 0; }
 .rend-input { -moz-appearance: textfield; }
@@ -1405,8 +1081,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .rend-fila:not(:last-child) {
   box-shadow: inset 0 calc(var(--hairline) * -1) 0 var(--borde);
 }
-/* La primera es la que más paga y es la respuesta a la pregunta que trajo al
-   usuario a este panel: se marca sola, sin tener que leer la columna. */
 .rend-fila:first-child { background: var(--acento-suave); }
 
 .rend-quien { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -1440,8 +1114,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   line-height: 1.5;
 }
 
-/* En pantallas chicas las tres columnas no entran: la ganancia pasa abajo,
-   ocupando el ancho, en vez de comprimir los números hasta que se corten. */
 @media (max-width: 380px) {
   .rend-fila { grid-template-columns: 1fr auto; }
   .rend-gana {
@@ -1451,33 +1123,17 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
 }
 
-/* ------------------------------------------------------------------- Tabs */
 
 .tabs {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
-  /* Columnas automáticas: la barra se reparte sola entre las tabs que haya, sin
-     que el CSS tenga que saber cuántas son. */
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
   max-width: var(--ancho); margin: 0 auto;
   padding-bottom: env(safe-area-inset-bottom);
-  /* Vidrio de verdad: el blur sube de 12 a 20 y se le suma saturación, que es
-     lo que da el color vivo de la barra de iOS. Con solo desenfoque la barra
-     queda lechosa y parece un panel gris translúcido. */
   background: var(--vidrio-nav);
   backdrop-filter: var(--vidrio-blur);
   -webkit-backdrop-filter: var(--vidrio-blur);
-  /* Hairline: en iOS la barra se separa del contenido con un pelo de línea,
-     no con un borde. Un 1px acá se lee como "caja". */
   border-top: var(--hairline) solid var(--vidrio-borde);
 }
-/* El resaltado de la sección activa, como una pieza que se mueve en vez de un
-   color que salta de un botón a otro. El JS le pasa las medidas del botón activo
-   en --x/--y/--w/--h y acá se decide qué forma toma con esas medidas: en el
-   teléfono es un subrayado fino de 2px bajo el ícono; en la barra de arriba, un
-   recuadro entero con halo. Una sola pieza, dos lecturas.
-
-   Sin --w todavía escrito —el primer pintado, antes de que haya medidas— se
-   queda invisible en vez de dibujar una raya de ancho cero en la esquina. */
 .tabs-pastilla {
   position: absolute; top: 0; left: 0;
   width: var(--w, 0); height: 2px;
@@ -1489,23 +1145,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .tabs-pastilla[data-lista] { opacity: 1; }
 
-/* La marca solo aparece en la barra de arriba: en el teléfono ya está en el
-   encabezado, y repetirla en una franja de 62px sería robarle lugar a las cinco
-   secciones. */
 .tabs-marca { display: none; }
 
-/* Los dos grupos de secciones —las cuatro del medio y la que va apartada— se
-   desarman en el teléfono. `display: contents` hace que las cajas no existan
-   para el layout y los botones vuelvan a ser hijos directos de la barra, así
-   que el grid de abajo los sigue repartiendo entre cinco columnas iguales.
-
-   Es la única forma de que la misma marcación sirva para una franja de cinco
-   botones parejos abajo y para tres zonas distintas arriba, sin dibujar la barra
-   dos veces. */
 .tabs-grupo, .tabs-fin { display: contents; }
 
 .tab {
-  position: relative; /* por encima de la pastilla, que va detrás */
+  position: relative;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   min-width: 0;
   padding: 10px 2px 12px;
@@ -1513,7 +1158,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--tenue-2); font-weight: 500;
   transition: color .15s;
 }
-/* Con cinco tabs, "Inversiones" no entra en un teléfono angosto. */
 .tab span {
   max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1521,7 +1165,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .tab.es-activo { color: var(--acento-tinta); }
 
-/* ---------------------------------------------------------------- Usuario */
 
 .perfil { display: flex; align-items: center; gap: 12px; }
 .perfil-avatar {
@@ -1533,7 +1176,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   color: var(--acento-tinta); font-size: 18px; font-weight: 500;
 }
 .perfil-datos { display: flex; flex-direction: column; min-width: 0; }
-/* Un email largo corta donde haga falta antes que estirar la tarjeta. */
 .perfil-email { font-size: 15px; overflow-wrap: anywhere; }
 
 .ajuste {
@@ -1567,7 +1209,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .interruptor:disabled { opacity: .45; cursor: default; }
 
-/* ------------------------------------------------------------------ Login */
 
 .carga-inicial { display: grid; place-items: center; min-height: 100svh; }
 .carga-inicial .login-marca { margin: 0; opacity: .55; }
@@ -1592,18 +1233,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border-color: var(--acento);
 }
 
-/* ==========================================================================
-   Movimiento
-   ==========================================================================
-
-   Todo lo que se mueve vive acá abajo, y TODO cuelga de
-   `prefers-reduced-motion: no-preference`. La razón es de robustez, no de
-   prolijidad: una animación de entrada arranca con la pieza invisible, así que
-   si alguien pide menos movimiento y lo único que hiciéramos fuera apagar la
-   animación, la pieza se quedaría invisible para siempre. Envolviendo al revés
-   —el reposo es el estado final, y la animación se AGREGA cuando se puede— no
-   hay forma de que quede algo sin verse.
-   ========================================================================== */
 
 @keyframes entrar {
   from { opacity: 0; transform: translateY(10px); }
@@ -1622,15 +1251,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   from { opacity: 0; }
 }
 
-/* -------------------------------------------------------- Esqueletos */
 
-/* El hueco que ocupa un dato mientras se lo busca. Tiene la forma y el tamaño
-   de lo que va a llegar, así que cuando llega nada salta de lugar: es la
-   diferencia entre esperar y que se te mueva la página en la cara.
-
-   El brillo es un pseudo-elemento y no un degradé animado sobre el fondo porque
-   animar background-position repinta en cada cuadro; una capa que se desplaza
-   con transform la compone la placa de video y no toca el hilo principal. */
 .esqueleto {
   position: relative;
   overflow: hidden;
@@ -1644,16 +1265,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .esqueleto-titulo { height: 15px; width: 45%; }
 .esqueleto-circulo { border-radius: 50%; aspect-ratio: 1; width: 100%; max-width: 200px; margin: 0 auto; }
 
-/* Las piezas de un esqueleto no pueden medir todas lo mismo: un bloque de
-   renglones iguales se lee como una tabla vacía, no como texto cargando. */
 .esqueleto-parrafo { display: flex; flex-direction: column; gap: 9px; }
 .esqueleto-parrafo .esqueleto:nth-child(1) { width: 100%; }
 .esqueleto-parrafo .esqueleto:nth-child(2) { width: 92%; }
 .esqueleto-parrafo .esqueleto:nth-child(3) { width: 74%; }
 
-/* Una fila de lista: el redondel del avatar, dos renglones de texto y el monto
-   a la derecha. Copia la grilla de .movimiento para que ocupe exactamente lo
-   mismo que la fila real. */
 .esqueleto-fila {
   display: grid; grid-template-columns: 34px 1fr 72px;
   align-items: center; gap: 12px;
@@ -1667,28 +1283,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .esqueleto-fila .esqueleto-texto .esqueleto:nth-child(2) { height: 10px; width: 42%; }
 .esqueleto-fila .esqueleto-monto { height: 13px; }
 
-/* El aviso de que esto puede tardar. Va junto al esqueleto y no en lugar de él:
-   el esqueleto dice "viene algo", la frase dice "puede demorar". */
 .esqueleto-nota { margin-top: 14px; font-size: 12.5px; color: var(--tenue-2); }
 
-/* --------------------------------------------------------- Animaciones */
 
 @media (prefers-reduced-motion: no-preference) {
-  /* La luz que recorre el hueco. */
   .esqueleto::after {
     background: linear-gradient(90deg, transparent, var(--brillo), transparent);
     animation: pasar-brillo 1.5s ease-in-out infinite;
   }
 
-  /* Entrada de la pantalla, escalonada.
-     La clase la pone el router SOLO cuando se cambia de sección, no en cada
-     repintado: tocar el ojo o cambiar de moneda vuelve a dibujar todo, y con la
-     animación suelta la pantalla entera parpadearía a cada toque.
-
-     El escalón es de 45ms y llega hasta la sexta tarjeta. Más largo y las
-     últimas llegan tarde; más piezas y habría que numerar cosas que casi nunca
-     existen. De la séptima en adelante entran con la sexta, que a esa altura ya
-     está fuera de la pantalla. */
   .contenido.es-nueva > * { animation: entrar .45s var(--curva) backwards; }
   .contenido.es-nueva > *:nth-child(2) { animation-delay: .045s; }
   .contenido.es-nueva > *:nth-child(3) { animation-delay: .09s; }
@@ -1696,100 +1299,28 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .contenido.es-nueva > *:nth-child(5) { animation-delay: .18s; }
   .contenido.es-nueva > *:nth-child(n+6) { animation-delay: .225s; }
 
-  /* Las barras crecen desde su borde izquierdo.
-     Va con scaleX y no animando el width: el ancho lo escribe el JS en el
-     atributo style de cada barra, así que una animación sobre width tendría que
-     conocer ese número. scaleX(0)→1 llega al ancho que tenga puesto, sea cual
-     sea, y además no fuerza al navegador a recalcular el layout en cada cuadro. */
   .barra-relleno, .salud-relleno {
     transform-origin: left center;
     animation: crecer-barra .75s var(--curva) backwards;
   }
 
-  /* Los gajos de la dona se abren desde donde arranca cada uno. El JS los dibuja
-     en cero y suelta el valor real un cuadro después; esta transición es la que
-     hace el resto. El escalonado lo pone el JS, que es el único que sabe cuántos
-     gajos hay. */
   .dona-gajo { transition: stroke-width .18s, opacity .18s, stroke-dasharray .8s var(--curva); }
 
-  /* El medidor de salud ya tenía su transición; ahora se dispara de verdad
-     porque el JS lo dibuja vacío primero. */
   .gauge-relleno { transition: stroke-dasharray .9s var(--curva); }
 
-  /* La línea se dibuja sola, de izquierda a derecha, y el relleno de abajo
-     aparece detrás. Las dos las prepara el JS, que es el único que puede medir
-     el largo del trazo. */
   .linea-area, .precio-area { animation: aparecer .9s ease-out .25s backwards; }
 }
 
-/* ==========================================================================
-   Pantallas grandes
-   ==========================================================================
-
-   TODO lo que sigue vive adentro de media queries con min-width. Por debajo de
-   768px no se aplica ni una de estas reglas, así que el diseño de teléfono es
-   exactamente el de siempre; ese es el contrato de esta sección y la razón de
-   que no haya nada suelto acá abajo.
-
-   Antes había un bloque en 720px que corría la columna de 480px hacia la
-   izquierda y dejaba el aire a la derecha. Se fue: entre 720 y 767 la columna
-   ahora queda centrada, igual que en 719, en vez de pegada a un costado.
-
-   Dos saltos:
-
-     768px  tablet  — la barra de tabs sube y se vuelve horizontal, con la marca
-                      reducida a monograma para que entren las cinco secciones.
-     1024px desktop — entra la marca completa y el contenido se acomoda mejor.
-
-   La barra va ARRIBA y es UNA SOLA. El encabezado no se suma abajo: se apaga, y
-   la marca, el período, el dólar y el ojo se mudan adentro de esta misma franja.
-   Dos bandas horizontales apiladas comerían el alto que en un laptop es lo que
-   escasea; una sola no. Por eso el encabezado desaparece en vez de convivir.
-
-   Hubo una versión anterior con la barra al costado, plegada a íconos. Se fue
-   por un problema concreto: el botón del período no entra en una columna de
-   76px —una etiqueta como "1 ene – 31 mar" se sale por el borde— y en una franja
-   horizontal tiene todo el ancho que necesita.
-   ========================================================================== */
 
 @media (min-width: 768px) {
   :root {
-    --alto-barra: 62px;     /* la franja de arriba */
-    --ancho-amplio: 1280px; /* techo del contenido: más que esto cansa de leer */
+    --alto-barra: 62px;
+    --ancho-amplio: 1280px;
 
-    /* La sangría que alinea la barra con el contenido de abajo. Sin esto la
-       marca arrancaría pegada al borde de la ventana mientras las tarjetas
-       arrancan a 1280px centrados, y la barra se leería como de otra página.
-
-       Es el borde del bloque de 1280 más los mismos 18px de aire que usa
-       .contenido; el max() la deja en 18 mientras la ventana sea más angosta
-       que el techo. */
     --sangria: max(18px, calc((100% - var(--ancho-amplio)) / 2 + 18px));
   }
 
-  /* ------------------------------------------------- Barra de secciones */
 
-  /* De franja fija abajo a franja fija arriba, y una sola:
-     ┌──────────────────────────────────────────────────────────┐
-     │ Cuentix   ⌂ Inicio  ⇄ Gastos  ▤ Ahorros  …   📅 agosto US$ 👁 │
-     └──────────────────────────────────────────────────────────┘
-       marca        navegación                        controles
-
-     Tres zonas: la marca anclada a la izquierda, las cuatro secciones de datos
-     centradas, y a la derecha los controles con Usuario al final.
-
-     En este tramo —de 768 a 1023, o sea un iPad vertical— las cuatro secciones
-     NO se centran: van pegadas a la marca, y los controles se empujan al borde
-     derecho. Hice la cuenta y centrarlas ahí no entra: los cuatro nombres más el
-     período, el dólar, el ojo y Usuario suman más que el ancho disponible, y
-     para que entren habría que dejar las secciones en íconos pelados. Entre un
-     menú centrado que no se entiende y uno alineado a la izquierda que sí, gana
-     el segundo. A partir de 1024 sobra lugar y ahí sí se centran, más abajo.
-
-     La sangría de los costados es la misma que la del contenido de abajo: la
-     marca queda a plomo con el borde izquierdo de las tarjetas y Usuario con el
-     derecho. Es lo que hace que se lea como una sola página y no como una barra
-     apoyada encima de otra cosa. */
   .tabs {
     top: 0; bottom: auto; left: 0; right: 0;
     width: auto; max-width: none;
@@ -1798,32 +1329,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
     display: flex; align-items: center;
     padding: 0 var(--sangria);
     border-top: 0;
-    /* Mismo hairline que en móvil, ahora abajo: la barra es la misma pieza y
-       tiene que sentirse igual en las dos orientaciones. El vidrio y la
-       saturación los hereda de la regla base, sin repetirlos. */
     border-bottom: var(--hairline) solid var(--vidrio-borde);
   }
 
-  /* Acá las cajas vuelven a existir: son las que arman las zonas. */
   .tabs-grupo, .tabs-fin {
     display: flex;
     align-items: center;
     gap: 3px;
     min-width: 0;
   }
-  /* Al borde derecho, y el margen automático hace de separador: entre la última
-     sección y el primer control queda todo el aire sobrante, que es lo que dice
-     que son dos cosas distintas sin necesidad de una raya.
-     flex:none para que lo que ceda cuando falte ancho sean los nombres de las
-     secciones, nunca los controles. */
   .tabs-fin {
     margin-left: auto;
     flex: none;
     gap: 6px;
   }
 
-  /* La marca ancla la barra a la izquierda. Con solo íconos, una franja
-     horizontal que arranca en la nada se lee como cortada. */
   .tabs-marca {
     display: flex; flex: none;
     margin-right: 22px;
@@ -1831,15 +1351,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
     font-weight: 600; font-size: 17px; letter-spacing: -.02em;
     white-space: nowrap;
   }
-  /* Hasta 1024 va solo la "C". Con la palabra entera, en un iPad vertical las
-     cinco secciones más los tres controles no entran en la fila y "Inversiones"
-     se parte. La inicial sola alcanza para anclar y cuesta 50px menos. */
   .tabs-marca-resto { display: none; }
 
-  /* Medidas apretadas: son las de un iPad vertical, donde la fila entera —marca,
-     cinco secciones y tres controles— entra por unos 27px. Con el padding cómodo
-     de escritorio no entraba y "Inversiones" se cortaba. A partir de 1024 se
-     aflojan de nuevo, más abajo. */
   .tab {
     flex-direction: row;
     align-items: center;
@@ -1851,11 +1364,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .tab .icono { flex: none; }
   .tab span { font-size: 12.5px; white-space: nowrap; }
 
-  /* Usuario se queda con la personita sola. El nombre no se borra con
-     display:none: se lo saca de la vista pero sigue en el DOM, que es de donde
-     el lector de pantalla saca a dónde lleva el botón. Un botón con solo un
-     dibujo adentro y nada más se anunciaría como "botón" y nada más.
-     El title lo muestra al pasar el mouse, para quien no reconozca el ícono. */
   .tab-solo-icono { padding: 8px 11px; }
   .tab-solo-icono span {
     position: absolute;
@@ -1865,22 +1373,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
     white-space: nowrap;
   }
 
-  /* La red de seguridad, por si la cuenta de arriba falla con otra tipografía o
-     con un idioma más largo: la marca y los controles NO se encogen (flex:none),
-     así que lo que cede es el nombre de la sección, que ya sabe cortarse con
-     puntos suspensivos porque lo hereda del teléfono. Se degrada a
-     "Inversione…", nunca a una barra desbordada. */
 
-  /* El fondo del hover solo para las que NO están activas: la activa ya tiene la
-     pastilla detrás, y pintarle encima otro fondo la taparía justo al pasarle
-     el mouse. */
   .tab:not(.es-activo):hover { color: var(--texto); background: var(--realce); }
   .tab.es-activo { color: var(--acento-tinta); }
 
-  /* Acá la pastilla deja de ser un subrayado fino y pasa a ser el recuadro
-     completo, y viaja en horizontal. Usa las cuatro medidas que le pasa el JS,
-     que en esta barra son estables: los botones no cambian de tamaño con el
-     mouse encima, así que lo medido sigue valiendo. */
   .tabs-pastilla {
     top: 0; left: 0;
     width: var(--w, 0); height: var(--h, 0);
@@ -1892,163 +1388,60 @@ button { font: inherit; color: inherit; cursor: pointer; }
                 height .3s var(--curva), opacity .2s;
   }
 
-  /* ------------------------- Los controles, a la derecha de la barra */
 
-  /* El período, el dólar y el ojo se mudan acá con el JS, adentro del grupo de
-     la derecha y por delante de Usuario. No llevan margen automático: de correr
-     el grupo hasta el borde se ocupa la columna, que es la tercera del grid. */
   .tabs .cabecera-acciones {
     flex: none;
     align-items: center;
     gap: 6px;
   }
 
-  /* El tope en vw es para un teléfono, donde 46vw son ~180px. Acá 46vw serían
-     casi 600 y una etiqueta larga —"1 ene – 31 mar"— empujaría al dólar y al ojo
-     contra el borde. Con un tope en píxeles la etiqueta se corta con puntos
-     suspensivos, que ya es lo que hace el span, y la fila no se mueve nunca. */
   .tabs .boton-periodo { max-width: 132px; }
 
-  /* Con la marca y los controles adentro de la barra, el encabezado se queda sin
-     nada que mostrar. Se va: dos franjas horizontales apiladas comerían el alto
-     que en un laptop es justo lo que falta. */
   .cabecera { display: none; }
 
-  /* --------------------------------------------------------- Esqueleto */
 
-  /* El hueco que deja la barra de arriba va en el contenedor de la app y no en
-     el body, porque el login y la pantalla de carga viven afuera y no tienen
-     barra: con el padding en el body les quedaría una franja vacía sin motivo. */
   #vista-app { padding-top: var(--alto-barra); }
 
   .contenido {
     max-width: var(--ancho-amplio);
-    /* Ya no hay barra abajo de la que escaparle; arriba sí hace falta aire
-       entre la franja y la primera tarjeta. */
     padding-top: 24px;
     padding-bottom: 44px;
 
-    /* De pila vertical a grilla de dos columnas. minmax(0,1fr) y no 1fr: sin
-       eso, una tabla o un texto largo ensancha su columna y descuadra la otra. */
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 
-    /* stretch y no start: las dos tarjetas de una misma fila terminan a la misma
-       altura, así que los bordes de abajo quedan alineados en toda la pantalla y
-       la grilla se lee pareja. Con `start` cada una medía lo que medía su
-       contenido y la página quedaba con los bordes dentados.
-
-       El costo es que una tarjeta corta al lado de una larga tiene aire de más
-       abajo. Vale la pena: ese aire se lee como respiro, y el borde desalineado
-       se lee como error. */
     align-items: stretch;
 
-    /* Un pelo más de aire entre columnas que entre filas. Dos tarjetas lado a
-       lado necesitan más separación que dos apiladas para leerse como
-       independientes; con la misma medida en los dos ejes, la grilla parece más
-       apretada a lo ancho de lo que está. */
     gap: 18px 20px;
   }
 
-  /* Las tarjetas estiradas reparten su contenido desde arriba. Sin esto, un
-     .bloque estirado —que es flex en columna— repartiría el sobrante entre sus
-     hijos y separaría el rótulo de su cifra. */
   .contenido > .bloque { justify-content: flex-start; }
 
-  /* Las mini-tarjetas se reparten el alto de su fila en partes iguales, en vez
-     de medir cada una lo que mide su contenido y dejar un vacío abajo. Sin esto
-     el estirado de la celda no llega hasta ellas: la celda crece y adentro las
-     tarjetas se quedan chicas, arriba, con el hueco a la vista. */
   .contenido > .grilla-2 { grid-auto-rows: 1fr; }
 
-  /* Por defecto cada sección sigue ocupando el ancho completo: una pantalla a
-     la que todavía no se le diseñó el reacomodo se ve como hoy, apilada, nada
-     más que más ancha. Cada pantalla se va soltando a dos columnas de a una,
-     abajo. */
   .contenido > * { grid-column: 1 / -1; }
 
-  /* Las vistas de detalle (una categoría abierta, el formulario de un
-     objetivo, el histórico de un ticker) vuelven a columna única y angosta: un
-     formulario repartido en dos columnas se completa peor, y son pantallas de
-     una sola tarea. Se reconocen por el botón de volver, que solo existe ahí. */
   .contenido:has(.boton-volver) {
     grid-template-columns: minmax(0, 680px);
     justify-content: center;
   }
 
-  /* --------------------------------------------------------------- Inicio */
 
-  /*   ┌──────────────┬──────────────┐
-       │ Balance      │ Ingr.│Ahorr. │   el número grande y sus dos desgloses,
-       ├──────────────┴──────────────┤   a la misma altura del ojo
-       │ Dona   ·   leyenda al lado  │   lo único que gana de veras con el ancho
-       ├──────────────┬──────────────┤
-       │ Salud        │ Recientes    │
-       └──────────────┴──────────────┘
-
-     La dona cruza las dos columnas en vez de quedarse en una: es el único
-     bloque donde "más ancho" significa "se entiende mejor", porque la leyenda
-     puede pararse al lado del gráfico en lugar de debajo. Metida en media
-     columna no entraría y habría que dejarla apilada, que es lo de hoy. */
-
-  /* La fila va escrita en todos, no solo la columna: el orden del DOM es
-     balance, salud, dona, mini-tarjetas, recientes, así que dejar que la fila
-     se resuelva sola mete a salud arriba de la dona y abre dos huecos. */
-  /* La narrativa se antepone al resto, así que corrió una fila a todo lo
-     demás. Va a lo ancho arriba de todo: es texto corrido y en una columna de
-     600px se lee bien; partida al medio de la grilla quedaría una columna de
-     prosa flaca al lado de una cifra.
-
-     El balance se ubica por CLASE y no por `:first-child`. Ese selector se
-     rompió en cuanto la narrativa pasó a ser el primer hijo: dejó de matchear
-     y la tarjeta caía al fondo de la página por autoposicionamiento. Una
-     posición de grilla no puede depender del orden del DOM cuando hay bloques
-     que aparecen y desaparecen según los datos. */
   [data-pantalla="inicio"] > .bloque-heroe { grid-column: 1; grid-row: 1; }
   [data-pantalla="inicio"] > .grilla-2 { grid-column: 2; grid-row: 1; }
   [data-pantalla="inicio"] > [aria-labelledby="titulo-gastos"] { grid-column: 1 / -1; grid-row: 2; }
   [data-pantalla="inicio"] > [aria-labelledby="titulo-salud"] { grid-column: 1; grid-row: 3; }
   [data-pantalla="inicio"] > .bloque-recientes { grid-column: 2; grid-row: 3; }
-  /* La narrativa cierra la pantalla, a lo ancho: es texto corrido y en media
-     columna quedaría una tira de prosa flaca al lado de una cifra. */
   [data-pantalla="inicio"] > .narrativa { grid-column: 1 / -1; grid-row: 4; }
 
-  /* Recientes al lado de Salud financiera, que es mucho más alta. La sección
-     se estira sola por la grilla, pero la LISTA de adentro se quedaba con su
-     alto natural y dejaba el recuadro cortado a media altura, con un vacío
-     debajo que rompía la simetría de la fila.
-
-     Con la sección en columna y la lista en flex:1, el recuadro llega hasta
-     abajo. Las filas conservan su alto —no se estiran para rellenar, que las
-     dejaría desparramadas— y el sobrante queda como aire dentro del bloque. */
   [data-pantalla="inicio"] > .bloque-recientes {
     display: flex;
     flex-direction: column;
   }
   [data-pantalla="inicio"] > .bloque-recientes .movimientos { flex: 1; }
 
-  /* Ingresos y Ahorrado son un rótulo y un número: unos 76px de alto. El balance
-     de al lado lleva los chips de moneda, el rótulo, la cifra grande y el
-     detalle, y pasa de 150. Estiradas para igualarlo quedaban dos cajas del
-     doble de alto que su contenido, con la mitad de abajo vacía.
-
-     Son la excepción al estirado de la grilla: se quedan con su alto propio y el
-     par se centra contra la cifra grande, que es donde está el peso visual de la
-     fila. Quedan proporcionadas a lo que dicen, y las dos iguales entre sí, que
-     es la simetría que importa acá.
-
-     Si se prefiere que peguen arriba o abajo en vez de al medio, es cambiar
-     `center` por `start` o `end`. */
   [data-pantalla="inicio"] > .grilla-2 { align-self: center; }
 
-  /* La dona y su leyenda son hermanas dentro de #dona, así que alcanza con
-     convertir ese contenedor en dos columnas. `auto` para el gráfico y no un
-     ancho fijo: así la figura pide lo que necesita y la leyenda se queda con
-     todo el resto. */
-  /* La leyenda lleva techo y el par va centrado: sin el techo, en un monitor
-     ancho el nombre queda contra el borde izquierdo y el monto contra el
-     derecho, con medio metro de nada en el medio, y hay que barrer la fila con
-     la vista para saber cuánto salió cada cosa. */
   [data-pantalla="inicio"] #dona {
     display: grid;
     grid-template-columns: auto minmax(0, 460px);
@@ -2057,49 +1450,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
     gap: 8px 40px;
   }
   [data-pantalla="inicio"] .dona-figura { max-width: 280px; }
-  /* El margen de arriba separaba la leyenda de la dona cuando iba debajo. Al
-     costado ya no separa nada: la descuelga. */
   [data-pantalla="inicio"] .leyenda { margin-top: 0; }
 
-  /* El medidor acompaña: en una columna de casi 600px, 200px de gauge quedan
-     perdidos en el medio de la tarjeta. */
   [data-pantalla="inicio"] .gauge { max-width: 240px; }
 
-  /* En el teléfono el nombre se queda con el sobrante y la barra mide 72px
-     fijos. En una columna ancha ese reparto deja un vacío entre el nombre y la
-     barra: acá el nombre pide solo lo suyo y el sobrante se lo lleva la barra,
-     que es lo único que gana algo con ser más larga. */
   [data-pantalla="inicio"] .salud-fila {
     grid-template-columns: max-content minmax(72px, 1fr) auto auto;
   }
 
-  /* --------------------------------------------------------------- Gastos */
 
-  /*   ┌──────────────┬──────────────┐
-       │ Gastado      │ 4 datos      │
-       ├──────────────┼──────────────┤
-       │ Acumulado    │ Reparto      │
-       ├──────────────┼──────────────┤
-       │ Por categoría│ Insights     │
-       └──────────────┴──────────────┘
-
-     Acá no hay ningún bloque que cruce las dos columnas, al revés que en
-     Inicio. La línea del acumulado es la razón: su SVG mantiene la proporción
-     del viewBox (320×128), así que a lo ancho de la pantalla entera mediría más
-     de 400px de alto y se comería la pantalla. En media columna queda alta pero
-     razonable.
-
-     Solo se escribe la columna, nunca la fila: las filas las resuelve el propio
-     grid siguiendo el orden del DOM, que ya es el de este dibujo. Escribirlas
-     obligaría a corregirlas cada vez que una tarjeta aparece o desaparece. */
-
-  /* El reacomodo entero cuelga de `:has(.grilla-2)`. Sin gastos en el período
-     no existen ni los cuatro datos, ni el reparto, ni los insights: quedan tres
-     bloques sueltos, y repartir tres bloques en dos columnas deja media pantalla
-     vacía. Cuando no está, no se aplica ninguna de estas reglas y manda el ancho
-     completo de más arriba, que es la pantalla apilada de siempre.
-
-     De paso deja afuera el detalle de una categoría, que tampoco la tiene. */
   [data-pantalla="gastos"]:has(.grilla-2) > .bloque:first-child { grid-column: 1; }
   [data-pantalla="gastos"]:has(.grilla-2) > .grilla-2 { grid-column: 2; }
   [data-pantalla="gastos"]:has(.grilla-2) > [aria-labelledby="titulo-evolucion"] { grid-column: 1; }
@@ -2107,31 +1466,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   [data-pantalla="gastos"]:has(.grilla-2) > [aria-labelledby="titulo-categorias"] { grid-column: 1; }
   [data-pantalla="gastos"]:has(.grilla-2) > [aria-labelledby="titulo-insights"] { grid-column: 2; }
 
-  /* Esta dona va sin leyenda —las barras de "Por categoría" cumplen ese papel—,
-     así que la tarjeta es el gráfico y nada más. A 240px queda una moneda en el
-     medio de una tarjeta de 580. */
   [data-pantalla="gastos"] .dona-figura { max-width: 300px; }
 
-  /* -------------------------------------------------------------- Ahorros */
 
-  /*   ┌──────────────┬──────────────┐
-       │ Ahorrado     │ Objetivos    │
-       ├──────────────┤              │   los objetivos toman las dos filas:
-       │ Dónde quedó  │              │   es una lista que crece
-       ├──────────────┼──────────────┤
-       │ Evolución    │ Detalle      │
-       └──────────────┴──────────────┘
-
-     El detalle del período va en media columna y no a lo ancho por lo mismo que
-     la leyenda de la dona en Inicio: en una fila de 1200px el comercio queda
-     contra el borde izquierdo y el monto contra el derecho, y hay que barrer la
-     fila entera con la vista para saber cuánto salió cada cosa.
-
-     `:not(:has(.boton-volver))` deja afuera el formulario de objetivo, que es
-     hijo de esta misma pantalla y también tiene un .bloque primero y otro
-     último. Sin eso, sus dos bloques se irían a columnas distintas de una
-     grilla que para el formulario ya es de una sola columna, y el segundo
-     abriría una columna fantasma. */
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .bloque:first-child { grid-column: 1; }
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > [aria-labelledby="titulo-objetivos"] {
     grid-column: 2;
@@ -2139,64 +1476,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > [aria-labelledby="titulo-lugares"] { grid-column: 1; }
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > [aria-labelledby="titulo-evolucion"] { grid-column: 1; }
-  /* Por clase y no por `:last-child`, por el mismo motivo que el balance de
-     Inicio: los retos y el patrimonio se agregan al final de esta pantalla, y
-     el detalle dejó de ser el último hijo. El selector no matcheaba nada y el
-     bloque caía fuera de su columna. */
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .bloque-detalle { grid-column: 2; }
 
-  /* Las dos secciones nuevas van a lo ancho, debajo de todo: retos es una
-     lista corta y el patrimonio lleva un gráfico que necesita ancho para que
-     la curva no se aplaste. */
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .patrimonio { grid-column: 1 / -1; }
-  /* El dólar también a lo ancho: lleva una tabla de siete filas con tres
-     columnas y un gráfico, y en media columna se apretaría. */
   [data-pantalla="ahorros"]:not(:has(.boton-volver)) > .dolar { grid-column: 1 / -1; }
 
-  /* ---------------------------------------------------------- Inversiones */
 
-  /*   ┌──────────────┬──────────────┐
-       │ Portafolio   │ Nota precios │
-       ├──────────────┼──────────────┤
-       │ Por tipo     │ Por moneda   │
-       │ (dona)       ├──────────────┤
-       │              │ Por sector   │
-       ├──────────────┴──────────────┤
-       │ Histórico (si está abierto) │
-       ├─────────────────────────────┤
-       │ Posiciones                  │
-       └─────────────────────────────┘
-
-     La dona toma dos filas y las dos tarjetas de barras se apilan al lado: la
-     dona lleva leyenda propia debajo, así que ya es alta, y las barras son tres
-     o cuatro renglones cada una. Al revés —cada una en su fila— la dona dejaría
-     una franja vacía a la derecha y las barras otra a la izquierda.
-
-     El valor del portafolio va con `span 1` y no en una columna fija porque hay
-     uno por moneda: con una queda arriba a la izquierda, con dos se ponen lado
-     a lado solos. */
   [data-pantalla="inversiones"] > .bloque:not(:last-child) { grid-column: span 1; }
 
-  /* Y la nota de precios se acomoda a cuántos resúmenes haya. Con una sola
-     moneda el resumen deja media fila libre y la nota se le sienta al lado;
-     con dos, la fila ya está llena y la nota cruza el ancho. Puesta siempre en
-     la columna 2 quedaba un hueco a su izquierda, y siempre a lo ancho quedaba
-     el hueco arriba: hay que elegir según el caso.
-
-     Dos resúmenes seguidos es lo que distingue un caso del otro: en el resto de
-     la pantalla nunca hay dos .bloque pegados —entre el primero y el de
-     Posiciones siempre van las tarjetas de distribución. */
   [data-pantalla="inversiones"] > .nota-precios { grid-column: 2; }
   [data-pantalla="inversiones"]:has(> .bloque + .bloque) > .nota-precios { grid-column: 1 / -1; }
 
-  /* Una sola moneda y ninguna salvedad de precios: el valor del portafolio se
-     quedaría solo en media fila con la otra mitad vacía. Ahí cruza el ancho y la
-     grilla arranca pareja desde la primera fila. */
   [data-pantalla="inversiones"]:not(:has(.nota-precios)):not(:has(> .bloque + .bloque))
     > .bloque:first-child { grid-column: 1 / -1; }
 
-  /* Estas tres tarjetas no tienen aria-labelledby del que agarrarlas: se las
-     reconoce por el nodo donde se dibuja cada gráfico, que sí tiene id. */
   [data-pantalla="inversiones"] > .tarjeta:has(#dona-tipo) {
     grid-column: 1;
     grid-row: span 2;
@@ -2206,44 +1499,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
   [data-pantalla="inversiones"] .dona-figura { max-width: 280px; }
 
-  /* ------------------------------------------------------------- Usuario */
 
-  /* Un email, un interruptor y un botón de salir. No hay nada que repartir: en
-     dos columnas quedaría una tarjeta suelta al lado de medio metro de nada.
-     Mismo trato que las vistas de detalle: una columna, angosta y centrada. */
-  /* Lleva el .contenido adelante para pesar más que la grilla de dos columnas
-     que esa misma clase define arriba: sin él quedan empatadas y decide el
-     orden en la hoja, que es una forma frágil de ganar. */
   .contenido[data-pantalla="usuario"] {
     grid-template-columns: minmax(0, 560px);
     justify-content: center;
   }
 }
 
-/* ------------------------------------------------------------- Desktop */
 
 @media (min-width: 1024px) {
-  /* Ahora sí entra la palabra entera al lado de las cinco secciones y los tres
-     controles, sin que nada se apriete. */
   .tabs-marca-resto { display: inline; }
   .tabs-marca { margin-right: 30px; }
 
-  /* Sobra ancho: se afloja lo que a 768 estaba al límite. */
   .tab { gap: 8px; padding: 9px 12px; }
   .tab span { font-size: 13.5px; }
 
-  /* Y acá sí, las cuatro secciones se centran de verdad: al medio de la barra,
-     no al medio del hueco que dejan los costados.
-
-     Va con grid de `1fr auto 1fr` y no con márgenes automáticos justamente por
-     eso. Con márgenes, el grupo se centra ENTRE la marca y los controles; como
-     los controles pesan tres veces más que la marca, quedaría corrido más de
-     100px a la izquierda y se vería torcido contra el eje de la página. Con dos
-     columnas elásticas iguales a los lados, el medio es el medio.
-
-     Que la del medio sea `auto` es además la red de seguridad: si algún día no
-     alcanzara el ancho, es esa columna la que cede primero y los nombres se
-     cortan con puntos suspensivos. La marca y los controles no se deforman. */
   .tabs {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -2253,38 +1523,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
     justify-self: end;
   }
 
-  /* Posiciones es lo único que se queda a lo ancho de las dos columnas: es la
-     lista larga de la pantalla y viene última en el DOM, así que no hay forma
-     de subirla al costado de las distribuciones sin escribir filas fijas, que
-     se romperían en cuanto se abra el histórico.
-
-     A un renglón por fila el ticker queda contra el borde izquierdo y su valor
-     contra el derecho. En dos columnas cada fila conserva exactamente el mismo
-     formato —marca, nombre, cantidad, valor, G/P— y vuelve a leerse de un
-     vistazo. Recién a partir de 1024: en el iPad vertical, media fila no
-     alcanza para el nombre del activo. */
   [data-pantalla="inversiones"] .posiciones {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 32px;
   }
-  /* En una sola columna la última posición no lleva raya porque no separa nada.
-     En dos, las últimas dos son el final de dos columnas distintas: una quedaba
-     con raya y la otra sin. Se la devuelve a todas y la lista cierra pareja. */
   [data-pantalla="inversiones"] .posiciones .posicion:last-child {
     border-bottom: 1px solid var(--borde);
   }
 
-  /* Este gráfico estira el trazo en vez de mantener la proporción, así que a lo
-     ancho de la pantalla entera 120px de alto aplastan la curva hasta volverla
-     una raya y no se ve ningún movimiento del precio. */
   [data-pantalla="inversiones"] .precio-svg { height: 170px; }
 }
 
-/* Las animaciones de entrada no hace falta apagarlas acá: nunca se encienden,
-   porque viven adentro de `no-preference`. Esto barre lo que quede suelto —las
-   transiciones de hover y foco, y cualquier animación que se agregue más
-   adelante sin acordarse de la regla. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition: none !important;
@@ -2292,16 +1542,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   }
 }
 
-/* --------------------------------------------------------------------------
-   Panel de administración
-   --------------------------------------------------------------------------
-   La única pantalla de datos del superusuario. Es una lista para operar, no
-   para leer: lo que tiene que resaltar es el ESTADO de cada cuenta y el botón
-   que lo cambia, no el email.
-
-   El chip va con clase propia y no con `.chip`, que en esta hoja ya es el
-   filtro clickeable de Gastos. Dos componentes distintos con el mismo nombre
-   terminan peleándose el padding y el color en la cascada. */
 
 .lista-usuarios {
   list-style: none;
@@ -2313,8 +1553,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .usuario-fila {
   display: grid;
-  /* El email se estira, el chip y el botón ocupan lo suyo. Con tres columnas
-     automáticas, un email largo empujaría el botón fuera de la tarjeta. */
   grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 12px;
@@ -2327,7 +1565,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .usuario-datos {
   display: grid;
   gap: 2px;
-  min-width: 0;   /* sin esto, un email largo no deja achicar la columna */
+  min-width: 0;
 }
 
 .usuario-email {
@@ -2346,8 +1584,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   border: 1px solid transparent;
 }
 
-/* El color no es lo único que distingue los tres estados: el texto del chip ya
-   los nombra. Así siguen siendo legibles para quien no separa verde de rojo. */
 .estado-chip.es-activo    { color: var(--suba);  background: color-mix(in srgb, var(--suba) 14%, transparent); }
 .estado-chip.es-pausado   { color: var(--error); background: color-mix(in srgb, var(--error) 14%, transparent); }
 .estado-chip.es-pendiente { color: var(--tenue); background: var(--realce); border-color: var(--borde); }
@@ -2370,8 +1606,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pasos-alta b { color: var(--texto); font-weight: 600; }
 
 @media (max-width: 30rem) {
-  /* En un teléfono las tres columnas no entran: el chip y el botón bajan a una
-     segunda fila, alineados a la derecha. */
   .usuario-fila {
     grid-template-columns: 1fr auto;
   }

@@ -1,13 +1,4 @@
 // Narrativa mensual: pedir el resumen, guardarlo y leer los anteriores.
-//
-// A la IA viajan NÚMEROS YA CALCULADOS, nunca movimientos ni las descripciones
-// que escribió el usuario. Los agregados se arman acá, en el navegador, que es
-// donde ya están los datos. Es el mismo contrato que el panel de Insights.
-//
-// El texto se GUARDA una vez y no se regenera: el mes ya pasó, así que el
-// resumen no va a cambiar, y volver a pedirlo sería gastar una llamada para
-// obtener casi lo mismo escrito distinto. De paso, eso hace que los meses
-// anteriores se puedan leer sin conexión al backend.
 
 import { BACKEND_URL } from "./config.js";
 import { comparar } from "./comparacion.js";
@@ -42,13 +33,7 @@ export async function traerNarrativas() {
   return data ?? [];
 }
 
-/**
- * Arma los agregados de un mes. Todo número, nada de texto del usuario.
- *
- * Se calculan acá y no en el backend a propósito: el backend no lee la base,
- * así que no podría, y además así queda a la vista qué es exactamente lo que
- * sale del navegador.
- */
+/** Arma los agregados de un mes. Todo número, nada de texto del usuario. */
 export function agregados(historial, objetivos, mes, moneda) {
   const delMes = historial.filter((m) => m.moneda === moneda && (m.fecha ?? "").startsWith(mes));
   const suma = (tipo) =>
@@ -125,8 +110,6 @@ export async function generarYGuardar(datos, mes) {
   const { texto } = await respuesta.json();
   if (!texto) throw new Error("El resumen salió vacío.");
 
-  // upsert y no insert: si dos pestañas lo piden a la vez, la segunda pisa en
-  // vez de chocar contra el índice único.
   const { data, error } = await sb
     .from(TABLA)
     .upsert({ mes, texto, moneda: datos.moneda }, { onConflict: "user_id,mes" })

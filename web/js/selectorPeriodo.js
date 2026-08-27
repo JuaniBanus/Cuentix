@@ -1,12 +1,4 @@
 // El selector de período: el botón del encabezado y su panel.
-//
-// Vive en el armazón de la app y no adentro de una pantalla, por dos razones:
-// el período vale para todas, y así no se redibuja —ni se cierra— cada vez que
-// se cambia de tab.
-//
-// El mes se elige con una grilla propia y no con <input type="month"> porque
-// Safari en iPhone no lo soporta y lo degrada a un campo de texto: en un celu
-// habría que tipear "2026-08" a mano.
 
 import { esMismoMes, mes, MESES, rango } from "./periodo.js";
 
@@ -26,8 +18,6 @@ export function montarSelectorPeriodo({ periodoInicial, onCambio }) {
 
   boton.addEventListener("click", () => (panel.hidden ? abrir() : cerrar()));
 
-  // Clic afuera y Escape cierran. Sin esto, en el celular el panel queda
-  // trabado y hay que apuntarle justo al botón para salir.
   document.addEventListener("click", (e) => {
     if (!panel.hidden && !panel.contains(e.target) && !boton.contains(e.target)) cerrar();
   });
@@ -72,9 +62,6 @@ function elegir(periodo) {
   avisar(periodo);
 }
 
-// --------------------------------------------------------------------------
-// El panel
-// --------------------------------------------------------------------------
 
 function dibujarPanel() {
   const hoy = new Date();
@@ -92,8 +79,6 @@ function dibujarPanel() {
 
   for (const chip of panel.querySelectorAll("[data-modo]")) {
     chip.addEventListener("click", () => {
-      // Cambiar de modo solo cambia lo que se ve: el período no se toca hasta
-      // que se elija algo concreto.
       const cuerpo = panel.querySelector(".panel-cuerpo");
       const aRango = chip.dataset.modo === "rango";
       for (const otro of panel.querySelectorAll("[data-modo]")) {
@@ -132,8 +117,6 @@ function cuerpoMes(hoy) {
 }
 
 function cuerpoRango() {
-  // Los campos arrancan con las fechas del período que ya estaba, sea un mes o
-  // un rango: siempre se edita algo, nunca se empieza de cero.
   return `
     <form class="panel-rango">
       <label class="campo">

@@ -1,11 +1,4 @@
 // Panel "Análisis del dólar", dentro de Gastos.
-//
-// Tres bloques: el análisis del día arriba —que es la lectura, no el dato—, la
-// tabla de las siete casas, y el gráfico de la elegida.
-//
-// El análisis va primero a propósito. Siete cotizaciones con dos precios cada
-// una son catorce números: el usuario no viene a leer una planilla, viene a
-// saber si el dólar se movió. La frase resume y la tabla respalda.
 
 import { esc, montosOcultos } from "../format.js";
 import { analisis, CASAS, nombreDe, ultimos } from "../dolar.js";
@@ -43,7 +36,6 @@ function grafico(puntos) {
   const valores = puntos.map((p) => p.venta);
   const max = Math.max(...valores);
   const min = Math.min(...valores);
-  // Si la serie es plana el rango sería 0 y la división rompería.
   const rango = max - min || 1;
 
   const coords = puntos.map((p, i) => ({
@@ -90,10 +82,6 @@ function textoAnalisis(a) {
   return partes.join(" ").replace(/\s+/g, " ");
 }
 
-/**
- * @param {HTMLElement} contenedor
- * @param {{datos, casaAbierta, setCasa}} ctx
- */
 export function renderDolar(contenedor, { datos, casaAbierta = "oficial", setCasa }) {
   const seccion = document.createElement("section");
   seccion.className = "tarjeta dolar";
