@@ -1493,14 +1493,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   [data-pantalla="inversiones"]:not(:has(.nota-precios)):not(:has(> .bloque + .bloque))
     > .bloque:first-child { grid-column: 1 / -1; }
 
-  [data-pantalla="inversiones"] > .tarjeta:has(#dona-tipo) {
-    grid-column: 1;
-    grid-row: span 2;
-  }
+  [data-pantalla="inversiones"] > .tarjeta:has(#barras-tipo) { grid-column: 1; }
   [data-pantalla="inversiones"] > .tarjeta:has(#barras-moneda) { grid-column: 2; }
-  [data-pantalla="inversiones"] > .tarjeta:has(#barras-sector) { grid-column: 2; }
 
-  [data-pantalla="inversiones"] .dona-figura { max-width: 280px; }
+  /* Con una sola moneda no hay tarjeta al lado: el reparto por tipo ocupa
+     la fila entera en vez de dejar medio ancho vacio. */
+  [data-pantalla="inversiones"]:not(:has(#barras-moneda))
+    > .tarjeta:has(#barras-tipo) { grid-column: 1 / -1; }
 
 
   .contenido[data-pantalla="usuario"] {

@@ -1,7 +1,6 @@
 // Pantalla Inversiones: valor del portafolio, distribución y posiciones.
 
 import { renderAviso } from "../aviso.js";
-import { renderDona } from "../donut.js";
 import { esqueletoInversiones, esqueletoPrecio } from "../esqueleto.js";
 import { esc, fechaCorta, monto, montosOcultos, tasaAUSD } from "../format.js";
 import { mercadoDe, ultimoConocido, vaPorElProxy } from "../mercado.js";
@@ -76,11 +75,6 @@ function evaluar(inversiones, precios, preciosMercado) {
       valuada: true, origen, desde,
     };
   });
-}
-
-/** Reparto por sector, con lo que no lo tenga agrupado aparte. */
-function porSector(posiciones) {
-  return agrupar(posiciones, (p) => (p.sector || "").trim() || "Sin sector");
 }
 
 /** Reparto porcentual por alguna clave, con TODO llevado a USD. */
@@ -341,7 +335,7 @@ export function renderInversiones(contenedor, ctx) {
       <h2 class="tarjeta-titulo">
         Distribución por tipo${monedas.length > 1 ? " <span class='titulo-nota'>· en USD</span>" : ""}
       </h2>
-      <div id="dona-tipo"></div>
+      <div id="barras-tipo"></div>
     </section>
 
     ${monedas.length > 1 ? `
@@ -351,13 +345,6 @@ export function renderInversiones(contenedor, ctx) {
       </h2>
       <div id="barras-moneda"></div>
     </section>` : ""}
-
-    <section class="tarjeta">
-      <h2 class="tarjeta-titulo">
-        Distribución por sector<span class='titulo-nota'>· en USD</span>
-      </h2>
-      <div id="barras-sector"></div>
-    </section>
 
     ${historico ? bloqueHistorico(historico) : ""}
 
@@ -372,17 +359,13 @@ export function renderInversiones(contenedor, ctx) {
     moneda común el reparto porcentual no significaría nada.</p>`;
 
   const porTipo = agrupar(posiciones, (p) => ETIQUETA_TIPO[p.tipo] ?? p.tipo);
-  const nodoDona = contenedor.querySelector("#dona-tipo");
-  if (porTipo) {
-    renderDona(nodoDona, porTipo, {
-      moneda: "USD",
-      total: porTipo.reduce((t, c) => t + c.total, 0),
-      tituloTotal: "Portafolio",
-      unidad: ["tipo", "tipos"],
-    });
-  } else {
-    nodoDona.innerHTML = SIN_TASAS;
-  }
+  contenedor.querySelector("#barras-tipo").innerHTML = porTipo
+    ? `<ul class="barras">
+        ${porTipo
+          .map((t, i) => `<li class="barra">${celdasDeBarra(t, i, "USD")}</li>`)
+          .join("")}
+      </ul>`
+    : SIN_TASAS;
 
   const nodoMoneda = contenedor.querySelector("#barras-moneda");
   const porMoneda = nodoMoneda && agrupar(posiciones, (p) => p.moneda);
@@ -393,20 +376,6 @@ export function renderInversiones(contenedor, ctx) {
           .join("")}
       </ul>`
     : SIN_TASAS;
-
-  const sectores = porSector(posiciones);
-  const nodoSector = contenedor.querySelector("#barras-sector");
-  if (!sectores) {
-    nodoSector.innerHTML = SIN_TASAS;
-  } else if (sectores.length === 1 && sectores[0].categoria === "Sin sector") {
-    nodoSector.innerHTML = `<p class="vacio">Ninguna tenencia tiene sector cargado.
-      El proveedor de precios no lo informa, así que sale de lo que le contás al
-      bot: «compré 10 CEDEARs de Apple a US$25, tecnología».</p>`;
-  } else {
-    nodoSector.innerHTML = `<ul class="barras">
-        ${sectores.map((s, i) => `<li class="barra">${celdasDeBarra(s, i, "USD")}</li>`).join("")}
-      </ul>`;
-  }
 
   if (historico && !historico.cargando && !historico.error) {
     const nodo = contenedor.querySelector("#grafico-precio");
