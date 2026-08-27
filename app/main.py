@@ -28,6 +28,7 @@ from app.tasas import obtener as obtener_tasas
 from app.config import ALERTAS_SECRET, CHATS_PERMITIDOS, ORIGENES_WEB, WEBHOOK_SECRET
 from app.cupos import CupoAgotado, barriendo
 from app.cupos import consumir as consumir_cupo
+from app.cupos import global_hoy as consumo_global_hoy
 from app.cupos import restante as cupo_restante
 from app.limites import Limite, LimiteExcedido, identificar
 from app.alertas import revisar as revisar_alertas_de_precio
@@ -176,9 +177,11 @@ async def _exigir_sesion(authorization: str | None, activo: bool = False) -> str
 
 
 def _cobrar(user_id: str, unidades: int, tickers: list[str]) -> None:
-    """Cobra unidades sueltas (sin gastar un refresco) o corta con un 429."""
-    if not unidades:
-        return
+    """Registra el pedido y cobra las unidades que gaste, o corta con un 429.
+
+    Se registra aunque cueste cero: el mercado argentino es gratis y el caché
+    también, y son justo los casos donde un barrido no dejaría rastro.
+    """
     try:
         consumir_cupo(user_id, unidades, refrescos=0, tickers=tickers)
     except CupoAgotado as exc:
@@ -286,13 +289,12 @@ async def api_precios(
     aviso = None
     solo_cache = False
 
-    if unidades:
-        try:
-            estado = consumir_cupo(usuario, unidades, refrescos=1, tickers=lista)
-            await _pausar_por_abuso(usuario, estado)
-        except CupoAgotado as exc:
-            logger.info("Cupo agotado para %s (%s)", usuario, exc.motivo)
-            aviso, solo_cache = str(exc), True
+    try:
+        estado = consumir_cupo(usuario, unidades, refrescos=1 if unidades else 0, tickers=lista)
+        await _pausar_por_abuso(usuario, estado)
+    except CupoAgotado as exc:
+        logger.info("Cupo agotado para %s (%s)", usuario, exc.motivo)
+        aviso, solo_cache = str(exc), True
 
     try:
         datos = await precios_de_mercado(pedidos, solo_cache=solo_cache)
@@ -421,8 +423,12 @@ async def api_cuota(
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     """Cuánto queda del cupo diario del proveedor. Para poder monitorearlo."""
-    await _exigir_sesion(authorization, activo=True)
-    return presupuesto_mercado()
+    usuario = await _exigir_sesion(authorization, activo=True)
+    return {
+        "global": consumo_global_hoy(),
+        "usuario": cupo_restante(usuario),
+        "proceso": presupuesto_mercado(),
+    }
 
 
 @app.post("/insights")
