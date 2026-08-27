@@ -344,12 +344,13 @@ export function renderInversiones(contenedor, ctx) {
       <div id="dona-tipo"></div>
     </section>
 
+    ${monedas.length > 1 ? `
     <section class="tarjeta">
       <h2 class="tarjeta-titulo">
-        Distribución por moneda${monedas.length > 1 ? " <span class='titulo-nota'>· en USD</span>" : ""}
+        Distribución por moneda <span class='titulo-nota'>· en USD</span>
       </h2>
       <div id="barras-moneda"></div>
-    </section>
+    </section>` : ""}
 
     <section class="tarjeta">
       <h2 class="tarjeta-titulo">
@@ -383,8 +384,9 @@ export function renderInversiones(contenedor, ctx) {
     nodoDona.innerHTML = SIN_TASAS;
   }
 
-  const porMoneda = agrupar(posiciones, (p) => p.moneda);
-  contenedor.querySelector("#barras-moneda").innerHTML = porMoneda
+  const nodoMoneda = contenedor.querySelector("#barras-moneda");
+  const porMoneda = nodoMoneda && agrupar(posiciones, (p) => p.moneda);
+  if (nodoMoneda) nodoMoneda.innerHTML = porMoneda
     ? `<ul class="barras">
         ${porMoneda
           .map((m, i) => `<li class="barra">${celdasDeBarra(m, i, "USD")}</li>`)
