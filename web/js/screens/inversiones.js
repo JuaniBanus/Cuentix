@@ -78,6 +78,50 @@ function evaluar(inversiones, precios, preciosMercado) {
 }
 
 /** Reparto porcentual por alguna clave, con TODO llevado a USD. */
+function porPosicion(posiciones) {
+  const filas = [];
+
+  for (const p of posiciones) {
+    const tasa = tasaAUSD(p.moneda);
+    if (tasa === null) return null;
+    filas.push({
+      etiqueta: p.ticker || p.nombre,
+      detalle: p.ticker ? p.nombre : ETIQUETA_TIPO[p.tipo] ?? p.tipo,
+      valor: p.valorActual * tasa,
+      propio: p.valorActual,
+      moneda: p.moneda,
+      gana: p.valuada ? p.ganancia >= 0 : null,
+    });
+  }
+
+  const total = filas.reduce((t, f) => t + f.valor, 0);
+  return filas
+    .map((f) => ({ ...f, porcentaje: total ? (f.valor / total) * 100 : 0 }))
+    .sort((a, b) => b.valor - a.valor);
+}
+
+
+function barrasPorPosicion(filas) {
+  const tope = filas[0]?.porcentaje || 100;
+
+  return filas
+    .map((f) => {
+      const tono = f.gana === null ? "es-neutra" : f.gana ? "es-suba" : "es-baja";
+      const pct = f.porcentaje < 1 ? "<1%" : `${f.porcentaje.toFixed(0)}%`;
+      return `
+      <li class="peso ${tono}">
+        <span class="peso-nombre" title="${esc(f.detalle)}">${esc(f.etiqueta)}</span>
+        <span class="peso-riel">
+          <span class="peso-relleno" style="width:${Math.max((f.porcentaje / tope) * 100, 1.5)}%"></span>
+        </span>
+        <span class="peso-pct">${pct}</span>
+        <span class="peso-monto">${monto(f.propio, f.moneda)}</span>
+      </li>`;
+    })
+    .join("");
+}
+
+
 function agrupar(posiciones, clave) {
   const mapa = new Map();
 
@@ -333,7 +377,7 @@ export function renderInversiones(contenedor, ctx) {
 
     <section class="tarjeta">
       <h2 class="tarjeta-titulo">
-        Distribución por tipo${monedas.length > 1 ? " <span class='titulo-nota'>· en USD</span>" : ""}
+        Concentración del portafolio${monedas.length > 1 ? " <span class='titulo-nota'>· repartido en USD</span>" : ""}
       </h2>
       <div id="barras-tipo"></div>
     </section>
@@ -358,13 +402,14 @@ export function renderInversiones(contenedor, ctx) {
   const SIN_TASAS = `<p class="vacio">No pude traer las cotizaciones, y sin una
     moneda común el reparto porcentual no significaría nada.</p>`;
 
-  const porTipo = agrupar(posiciones, (p) => ETIQUETA_TIPO[p.tipo] ?? p.tipo);
-  contenedor.querySelector("#barras-tipo").innerHTML = porTipo
-    ? `<ul class="barras">
-        ${porTipo
-          .map((t, i) => `<li class="barra">${celdasDeBarra(t, i, "USD")}</li>`)
-          .join("")}
-      </ul>`
+  const pesos = porPosicion(posiciones);
+  const mayor = pesos?.[0];
+  contenedor.querySelector("#barras-tipo").innerHTML = pesos
+    ? `<ul class="pesos">${barrasPorPosicion(pesos)}</ul>` +
+      (mayor && mayor.porcentaje >= 40
+        ? `<p class="peso-aviso">${esc(mayor.etiqueta)} concentra el
+           ${mayor.porcentaje.toFixed(0)}% del portafolio.</p>`
+        : "")
     : SIN_TASAS;
 
   const nodoMoneda = contenedor.querySelector("#barras-moneda");
