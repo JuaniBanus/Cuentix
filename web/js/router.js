@@ -94,7 +94,6 @@ export function pintar(conEntrada = false) {
     movimientosPrevios: estado.movimientosPrevios,
     historialAhorros: estado.historialAhorros,
     historialGastos: estado.historialGastos,
-    serieDolar: estado.serieDolar,
     narrativas: estado.narrativas,
     narrativaCargando: estado.narrativaCargando,
     errorNarrativa: estado.errorNarrativa,

@@ -12,7 +12,6 @@ function estadoInicial() {
     movimientosPrevios: [],
     historialAhorros: [],
     historialGastos: [],
-    serieDolar: null,
 
     narrativas: [],
     narrativaCargando: false,

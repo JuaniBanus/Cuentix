@@ -867,24 +867,34 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 
 .patrimonio { display: flex; flex-direction: column; gap: 4px; }
-.patrimonio-cifras { margin: 6px 0 2px; }
-.patrimonio-lectura { margin-top: 6px; }
-.patrimonio-grafico { margin-top: 14px; }
 
-.patrimonio-linea { width: 100%; height: auto; display: block; overflow: visible; }
-.patrimonio-trazo {
-  fill: none; stroke: var(--acento-claro);
-  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+.registro-totales {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 6px 0 14px;
 }
-.patrimonio-area { fill: color-mix(in srgb, var(--acento) 16%, transparent); stroke: none; }
-.patrimonio-punto { fill: var(--acento-claro); }
 
-.patrimonio-ejes {
-  display: flex; justify-content: space-between;
-  margin-top: 4px;
-  font-size: 11.5px; color: var(--tenue-2);
+.registro-meses { display: flex; flex-direction: column; }
+.registro-fila {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 10px 0;
+  border-bottom: var(--hairline) solid var(--borde);
+}
+.registro-fila:last-child { border-bottom: 0; }
+
+.registro-mes {
+  font-size: 13.5px; font-weight: 500; color: var(--tenue);
+  text-transform: capitalize;
+}
+
+.registro-cifras { display: flex; gap: 18px; }
+.registro-cifra { display: flex; flex-direction: column; align-items: flex-end; }
+.registro-cifra.es-tenue { opacity: .45; }
+.registro-monto {
+  font-size: 14.5px; font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+.registro-etiqueta { font-size: 11px; color: var(--tenue-2); }
 
 
 .narrativa { display: flex; flex-direction: column; gap: 6px; }

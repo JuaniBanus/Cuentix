@@ -1,6 +1,6 @@
 // Service worker de Cuentix.
 
-const VERSION = "cuentix-v19";
+const VERSION = "cuentix-v20";
 
 const ESENCIALES = [
   "./",
