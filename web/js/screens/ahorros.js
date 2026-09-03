@@ -67,13 +67,8 @@ export function renderAhorros(contenedor, ctx) {
     });
     renderRendimientos(contenedor, { rendimientos: ctx.rendimientos ?? [], hoy: ctx.hoy });
 
-    if (historialAhorros?.length || ctx.inversiones?.length) {
-      renderPatrimonio(contenedor, {
-        ahorros: historialAhorros,
-        inversiones: ctx.inversiones ?? [],
-        moneda,
-        serieDolar: ctx.serieDolar ?? null,
-      });
+    if (historialAhorros?.length) {
+      renderPatrimonio(contenedor, { ahorros: historialAhorros });
     }
   };
 

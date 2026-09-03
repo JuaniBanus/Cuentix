@@ -33,7 +33,6 @@ import { esqueletoPantalla } from "./esqueleto.js";
 import { estado, reiniciarEstado } from "./estado.js";
 import { MESES_ANALIZADOS, armarAgregados, pedirInsights } from "./insights.js";
 import { alternarDolares, alternarOcultos, fijarCotizacion, montosOcultos } from "./format.js";
-import { serieDolar } from "./patrimonio.js";
 import { alCambiarDeTamano } from "./pantalla.js";
 import { anterior, mesActual } from "./periodo.js";
 import { traerHistorico, traerPrecios } from "./mercado.js";
@@ -294,16 +293,6 @@ async function cargarDatos() {
       });
     }
 
-    if (!estado.serieDolar) {
-      serieDolar()
-        .then((serie) => {
-          if (serie) {
-            estado.serieDolar = serie;
-            pintar();
-          }
-        })
-        .catch(() => {});
-    }
     estado.objetivos = objetivos;
     estado.error = null;
 
