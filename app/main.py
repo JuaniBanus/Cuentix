@@ -104,7 +104,12 @@ from app.models import (
     TipoMovimiento,
 )
 from app.objetivos import buscar, parsear_monto, progreso
-from app.parser import Interpretacion, ParserError, interpretar_mensaje
+from app.parser import (
+    Interpretacion,
+    ParserError,
+    ServicioNoDisponible,
+    interpretar_mensaje,
+)
 from app.usuarios import Usuario
 from app.usuarios import resolver as resolver_usuario
 from app.recordatorio import atender_comando as atender_comando_recordatorio
@@ -135,6 +140,12 @@ MSG_NO_ENTENDI = (
     "Escribí /ayuda para ver todo lo que puedo hacer."
 )
 MSG_ERROR_INTERNO = "Se me rompió algo 😬 Probá de nuevo en un ratito."
+
+MSG_SERVICIO_CAIDO = (
+    "Ahora mismo no puedo leer los mensajes 😵‍💫\n"
+    "El servicio que uso para entenderte está saturado.\n"
+    "Mandámelo de nuevo en un minuto y lo anoto."
+)
 
 MSG_SIN_ACCESO = (
     "No tengo tu acceso habilitado 🔒\n"
@@ -585,6 +596,10 @@ async def procesar_update(update: Any) -> None:
 
     try:
         interpretacion = await run_in_threadpool(interpretar_mensaje, texto)
+    except ServicioNoDisponible as exc:
+        logger.error("Gemini no está disponible para %s: %s", chat_id, exc)
+        await _responder(chat_id, MSG_SERVICIO_CAIDO)
+        return
     except ParserError as exc:
         logger.info("No se pudo interpretar %r: %s", texto, exc)
         await _responder(chat_id, MSG_NO_ENTENDI)
