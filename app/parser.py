@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
@@ -36,12 +37,26 @@ from app.models import (
 logger = logging.getLogger(__name__)
 
 MODELO = "gemini-3.5-flash-lite"
+# Cuando el lite está saturado (503) el bot queda mudo. El hermano grande
+# entiende lo mismo y suele tener capacidad libre: sale más caro, pero solo
+# se usa cuando la alternativa es no contestar.
+MODELO_RESPALDO = "gemini-3.5-flash"
 
 _cliente = genai.Client(api_key=GEMINI_API_KEY)
 
 
 class ParserError(RuntimeError):
     """No se pudo interpretar el texto."""
+
+
+class ServicioNoDisponible(ParserError):
+    """Gemini no contestó. El texto puede estar perfecto: el problema es el servicio."""
+
+
+CODIGOS_PASAJEROS = frozenset({429, 500, 502, 503, 504})
+
+REINTENTOS = 3
+ESPERA_REINTENTO = 0.6
 
 
 class _MovimientoExtraido(BaseModel):
@@ -973,6 +988,62 @@ def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     )
 
 
+def _preguntarle_a_gemini(texto: str, hoy: date):
+    """Interroga a Gemini reintentando los fallos pasajeros y cayendo al respaldo.
+
+    Un 503 por saturación no dice nada del mensaje del usuario, así que no puede
+    terminar en un «no entendí»: se reintenta, se prueba el otro modelo y recién
+    ahí se admite que el servicio está caído.
+    """
+    config = types.GenerateContentConfig(
+        system_instruction=_instruccion_sistema(hoy),
+        response_mime_type="application/json",
+        response_schema=_InterpretacionExtraida,
+        temperature=0,
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+    )
+
+    ultimo: Exception | None = None
+
+    for modelo in (MODELO, MODELO_RESPALDO):
+        for intento in range(1, REINTENTOS + 1):
+            try:
+                respuesta = _cliente.models.generate_content(
+                    model=modelo, contents=texto, config=config
+                )
+            except genai_errors.APIError as exc:
+                ultimo = exc
+                if exc.code not in CODIGOS_PASAJEROS:
+                    logger.exception("Gemini rechazó la consulta (error %s)", exc.code)
+                    raise ServicioNoDisponible(
+                        f"El servicio de interpretación falló (error {exc.code})."
+                    ) from exc
+                logger.warning(
+                    "%s devolvió %s (intento %s/%s)",
+                    modelo, exc.code, intento, REINTENTOS,
+                )
+            except Exception as exc:
+                ultimo = exc
+                logger.warning(
+                    "Error de red hablando con %s (intento %s/%s)",
+                    modelo, intento, REINTENTOS, exc_info=True,
+                )
+            else:
+                if modelo is not MODELO:
+                    logger.info("Contestó el modelo de respaldo %s", modelo)
+                return respuesta
+
+            if intento < REINTENTOS:
+                time.sleep(ESPERA_REINTENTO * intento)
+
+    logger.error(
+        "Ningún modelo contestó tras %s intentos cada uno", REINTENTOS, exc_info=ultimo
+    )
+    raise ServicioNoDisponible(
+        "No pude contactar al servicio de interpretación."
+    ) from ultimo
+
+
 def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
     """Decide si el mensaje es un registro o una consulta, y extrae sus datos."""
     texto = (texto or "").strip()
@@ -981,27 +1052,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
 
     hoy = hoy or date.today()
 
-    try:
-        respuesta = _cliente.models.generate_content(
-            model=MODELO,
-            contents=texto,
-            config=types.GenerateContentConfig(
-                system_instruction=_instruccion_sistema(hoy),
-                response_mime_type="application/json",
-                response_schema=_InterpretacionExtraida,
-                temperature=0,
-                thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-            ),
-        )
-    except genai_errors.APIError as exc:
-        logger.exception("Falló la llamada a Gemini")
-        raise ParserError(
-            f"No pude contactar al servicio de interpretación (error {exc.code}). "
-            "Probá de nuevo en un momento."
-        ) from exc
-    except Exception as exc:
-        logger.exception("Error inesperado llamando a Gemini")
-        raise ParserError("No pude contactar al servicio de interpretación.") from exc
+    respuesta = _preguntarle_a_gemini(texto, hoy)
 
     extraida = respuesta.parsed
     if extraida is None:
