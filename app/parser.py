@@ -738,6 +738,14 @@ def _categoria_de(
     mención viaja hasta el bot para que pregunte. Nunca se crea una categoría
     sin que el usuario la pida.
     """
+    if not vocabulario:
+        # Sin lista —la migración todavía no corrió, o la lectura falló— el bot
+        # se comporta como antes de todo esto y acepta lo que diga el modelo.
+        # Es mejor que mandar cada gasto a "otros" o quedarse mudo: Render se
+        # despliega solo, así que este estado existe de verdad por un rato.
+        etiqueta = (extraido.categoria or extraido.categoria_nueva or "").strip()
+        return etiqueta.lower()[:60] or "otros", None
+
     elegida = vocabulario.resolver(extraido.categoria, tipo)
     if elegida is not None:
         return elegida.nombre, None

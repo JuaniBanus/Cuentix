@@ -619,9 +619,15 @@ async def procesar_update(update: Any) -> None:
     try:
         vocabulario = await run_in_threadpool(_vocabulario, usuario.user_id)
     except Exception:
-        logger.exception("No pude leer las categorías de %s", chat_id)
-        await _responder(chat_id, MSG_ERROR_INTERNO)
-        return
+        # Un vocabulario vacío no frena al bot: el parser vuelve a aceptar lo
+        # que diga el modelo, como antes de que existieran las categorías. Pasa
+        # si todavía no se corrió migrations/019_categorias.sql, y Render se
+        # despliega solo apenas hay push.
+        logger.exception(
+            "No pude leer las categorías de %s: sigo sin lista. ¿Falta correr "
+            "migrations/019_categorias.sql?", chat_id,
+        )
+        vocabulario = Vocabulario([])
 
     # "¿qué categorías tengo?" y "creá la categoría X" no tienen nada que
     # interpretar, y el cupo de Gemini es de 20 por hora: se resuelven acá.
