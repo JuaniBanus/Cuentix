@@ -65,9 +65,11 @@ from app.retos import (
 from app.db import (
     DBError,
     Total,
+    alertas_de_chat,
     balance,
     borrar_categoria,
     cerrar_reto,
+    crear_alerta,
     claves_de_items,
     categorias_frecuentes,
     crear_categoria,
