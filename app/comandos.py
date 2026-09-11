@@ -45,6 +45,15 @@ Si me decís para qué apartás la plata, la imputo al objetivo y te digo cómo
 venís: «guardé 150 mil para el viaje a Europa».
 Si no tengo uno que coincida, te pregunto antes de crearlo. Nunca lo adivino.
 
+🏷 CATEGORÍAS
+Tenés una lista de rubros y yo elijo SOLO de ahí: nunca invento una etiqueta,
+así que «súper» y «supermercado» no se te separan en dos.
+• «¿qué categorías tengo?» — ver la lista (también /categorias)
+• «creá la categoría cerámica» — sumar una tuya, que solo ves vos
+• «borrá la categoría cerámica» — sacarla (te aviso si hay gastos usándola)
+Si anotás algo que no entra en ninguna, te pregunto antes de etiquetarlo:
+te ofrezco las más parecidas y podés crear una nueva en el momento.
+
 🏦 DÓNDE GUARDÁS LA PLATA
 Si me decís dónde queda, lo anoto: «guardé 50 mil en el banco»,
 «aparté efectivo», «lo puse en Mercado Pago». Si no lo aclarás, no pasa
@@ -81,6 +90,7 @@ Las tasas se actualizan solas una vez por día.
 ⚙️ COMANDOS
 /start — presentación
 /ayuda — esta ayuda
+/categorias — ver tus rubros
 /rendimientos — comparar billeteras virtuales
 /recordatorio — ver si tenés recordatorio diario
 /recordatorio 21 — que te escriba a esa hora

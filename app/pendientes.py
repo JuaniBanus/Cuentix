@@ -7,20 +7,52 @@ from dataclasses import dataclass, field
 
 VIGENCIA_SEGUNDOS = 10 * 60
 
+# Cuántas categorías se preguntan como mucho en un mensaje. Un cierre del día
+# con veinte ítems raros no puede secuestrar el chat: lo que pasa de acá queda
+# en "otros" y se avisa en el resumen.
+TOPE_COLA = 5
+
 
 @dataclass
 class Pendiente:
-    """La pregunta abierta de un chat."""
+    """La pregunta abierta de un chat.
+
+    Los campos describen la pregunta EN CURSO. `cola` guarda las que vienen
+    después, para el caso de un mensaje con varios movimientos sin categoría:
+    se contesta una y aparece la siguiente.
+    """
 
     tipo: str
     movimiento_id: int
     mencion: str
     moneda: str
     candidatos: list[dict] = field(default_factory=list)
+    cola: list[dict] = field(default_factory=list)
+    datos: dict = field(default_factory=dict)
     creado: float = field(default_factory=time.monotonic)
 
     def vencio(self, ahora: float | None = None) -> bool:
+        """El vencimiento corre para la cola entera, no por pregunta.
+
+        Si el usuario se fue a la mitad, lo que quedaba sin contestar se queda
+        en "otros" y el próximo mensaje se procesa como cualquier otro.
+        """
         return (ahora or time.monotonic()) - self.creado > VIGENCIA_SEGUNDOS
+
+    def avanzar(self) -> bool:
+        """Pasa a la siguiente pregunta de la cola. False si no queda ninguna."""
+        if not self.cola:
+            return False
+
+        siguiente = self.cola.pop(0)
+        self.movimiento_id = siguiente["movimiento_id"]
+        self.mencion = siguiente["mencion"]
+        self.candidatos = siguiente.get("candidatos", [])
+        return True
+
+    @property
+    def restantes(self) -> int:
+        return len(self.cola)
 
 
 _abiertas: dict[int, Pendiente] = {}

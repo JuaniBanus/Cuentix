@@ -66,11 +66,17 @@ from app.db import (
     DBError,
     Total,
     balance,
+    borrar_categoria,
     cerrar_reto,
     claves_de_items,
+    categorias_frecuentes,
+    crear_categoria,
     crear_objetivo,
     crear_reto,
     gastado_en_reto,
+    obtener_categorias,
+    recategorizar_movimiento,
+    recategorizar_todos,
     reto_activo,
     historial_de_item,
     movimientos_para_termometro,
@@ -88,12 +94,22 @@ from app.db import (
     total_imputado,
     totales_por_categoria,
     totales_por_moneda,
+    uso_de_categoria,
+)
+from app.categorias import (
+    Categoria,
+    Vocabulario,
+    formatear_listado,
+    leer_comando as leer_comando_categorias,
+    leer_creacion,
 )
 from app.models import (
+    AccionCategoria,
     Alerta,
     CompraHipotetica,
     Consulta,
     Financiacion,
+    GestionCategoria,
     Intencion,
     Inversion,
     Moneda,
@@ -103,7 +119,7 @@ from app.models import (
     TipoInversion,
     TipoMovimiento,
 )
-from app.objetivos import buscar, parsear_monto, progreso
+from app.objetivos import buscar, normalizar, parsear_monto, progreso
 from app.parser import (
     Interpretacion,
     ParserError,
@@ -161,6 +177,10 @@ TOPE_AVISOS = 2_000
 _aviso_webhook_viejo = False
 
 TOPE_CATEGORIAS = 8
+
+# Cuántas categorías propias puede tener un usuario. Es un techo generoso: con
+# más de esto la lista deja de servir para elegir y el prompt se infla al pedo.
+TOPE_PROPIAS = 60
 
 LIMITE_MERCADO = Limite(30, 60.0, "mercado")
 LIMITE_GEMINI = Limite(20, 3600.0, "gemini")
@@ -595,7 +615,37 @@ async def procesar_update(update: Any) -> None:
         return
 
     try:
-        interpretacion = await run_in_threadpool(interpretar_mensaje, texto)
+        vocabulario = await run_in_threadpool(_vocabulario, usuario.user_id)
+    except Exception:
+        logger.exception("No pude leer las categorías de %s", chat_id)
+        await _responder(chat_id, MSG_ERROR_INTERNO)
+        return
+
+    # "¿qué categorías tengo?" y "creá la categoría X" no tienen nada que
+    # interpretar, y el cupo de Gemini es de 20 por hora: se resuelven acá.
+    comando = leer_comando_categorias(texto)
+    if comando is not None:
+        logger.info("Comando de categorías de %s: %r", chat_id, texto)
+        try:
+            respuesta = await _resolver_gestion_categorias(
+                GestionCategoria(
+                    accion=AccionCategoria(comando.accion), nombre=comando.nombre
+                ),
+                vocabulario,
+                chat_id,
+                usuario.user_id,
+            )
+        except Exception:
+            logger.exception("Error gestionando las categorías de %s", chat_id)
+            await _responder(chat_id, MSG_ERROR_INTERNO)
+            return
+        await _responder(chat_id, respuesta)
+        return
+
+    try:
+        interpretacion = await run_in_threadpool(
+            interpretar_mensaje, texto, vocabulario
+        )
     except ServicioNoDisponible as exc:
         logger.error("Gemini no está disponible para %s: %s", chat_id, exc)
         await _responder(chat_id, MSG_SERVICIO_CAIDO)
@@ -610,7 +660,9 @@ async def procesar_update(update: Any) -> None:
         return
 
     try:
-        respuesta = await _resolver(interpretacion, chat_id, usuario.user_id)
+        respuesta = await _resolver(
+            interpretacion, chat_id, usuario.user_id, vocabulario
+        )
     except Exception:
         logger.exception("Error resolviendo la intención %s", interpretacion.intencion)
         await _responder(chat_id, MSG_ERROR_INTERNO)
@@ -663,7 +715,12 @@ def _podar_avisos(ahora: float) -> None:
             del _ultimo_aviso[chat]
 
 
-async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) -> str:
+async def _resolver(
+    interpretacion: Interpretacion,
+    chat_id: int,
+    user_id: str,
+    vocabulario: Vocabulario,
+) -> str:
     """Ejecuta la intención y devuelve el texto a mandarle al usuario."""
     intencion = interpretacion.intencion
 
@@ -672,6 +729,9 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) 
             _con_clave_item, interpretacion.movimiento, user_id
         )
         if interpretacion.objetivo:
+            # El objetivo también abre una pregunta, y solo hay una por chat.
+            # Gana esa: dónde va la plata importa más que con qué etiqueta
+            # quedó, y el movimiento igual entra en "otros".
             return await _registrar_hacia_objetivo(
                 chat_id, movimiento, interpretacion.objetivo, user_id
             )
@@ -682,10 +742,26 @@ async def _resolver(interpretacion: Interpretacion, chat_id: int, user_id: str) 
             guardar_movimiento, movimiento, user_id=user_id
         )
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
-        return _confirmacion(movimiento) + aviso + aviso_reto
+
+        pregunta = ""
+        if interpretacion.categoria_nueva:
+            pregunta = await _abrir_preguntas_categoria(
+                chat_id,
+                [(movimiento_id, interpretacion.categoria_nueva, movimiento.tipo)],
+                vocabulario,
+                user_id,
+                movimiento.moneda,
+            )
+
+        return _confirmacion(movimiento) + aviso + aviso_reto + pregunta
 
     if intencion is Intencion.REGISTRAR_VARIOS:
-        return await _resolver_varios(interpretacion, user_id)
+        return await _resolver_varios(interpretacion, chat_id, user_id, vocabulario)
+
+    if intencion is Intencion.GESTIONAR_CATEGORIAS:
+        return await _resolver_gestion_categorias(
+            interpretacion.gestion, vocabulario, chat_id, user_id
+        )
 
     if intencion is Intencion.REGISTRAR_INVERSION:
         return await _resolver_inversion(interpretacion, user_id)
@@ -1117,7 +1193,12 @@ def _aviso_de_salto(movimiento: Movimiento, user_id: str) -> str:
     )
 
 
-async def _resolver_varios(interpretacion: Interpretacion, user_id: str) -> str:
+async def _resolver_varios(
+    interpretacion: Interpretacion,
+    chat_id: int,
+    user_id: str,
+    vocabulario: Vocabulario,
+) -> str:
     """Guarda los movimientos que vinieron completos y pregunta por el resto."""
     movimientos = list(interpretacion.movimientos)
     dudas = interpretacion.dudas
@@ -1128,7 +1209,19 @@ async def _resolver_varios(interpretacion: Interpretacion, user_id: str) -> str:
     ids = await run_in_threadpool(guardar_movimientos, movimientos, user_id=user_id)
     logger.info("Movimientos guardados en lote: %s", ids)
 
-    return _texto_resumen(movimientos, dudas)
+    # El parser devuelve la POSICIÓN de cada ítem sin categoría, porque el id
+    # recién existe después de guardar. Acá se cruzan las dos listas.
+    faltantes = [
+        (ids[posicion], mencion, movimientos[posicion].tipo)
+        for posicion, mencion in interpretacion.sin_categoria
+        if posicion < len(ids)
+    ]
+
+    pregunta = await _abrir_preguntas_categoria(
+        chat_id, faltantes, vocabulario, user_id, movimientos[0].moneda
+    )
+
+    return _texto_resumen(movimientos, dudas) + pregunta
 
 
 def _texto_resumen(
@@ -1374,11 +1467,428 @@ async def _registrar_hacia_objetivo(
     )
 
 
+def _vocabulario(user_id: str) -> Vocabulario:
+    """Las categorías que ese usuario puede usar, listas para el parser.
+
+    Se lee en cada mensaje en vez de cachearse: importa más que la lista esté
+    fresca justo después de crear una categoría que ahorrar una consulta.
+    """
+    filas = obtener_categorias(user_id=user_id)
+
+    categorias = []
+    for fila in filas:
+        try:
+            tipo = TipoMovimiento(fila["tipo"])
+        except ValueError:
+            logger.warning("Categoría con tipo desconocido: %r", fila.get("tipo"))
+            continue
+        categorias.append(
+            Categoria(
+                nombre=fila["nombre"],
+                tipo=tipo,
+                emoji=fila.get("emoji"),
+                propia=fila.get("user_id") is not None,
+            )
+        )
+
+    return Vocabulario(categorias)
+
+
+# Respuestas que cierran la pregunta de categoría dejando el movimiento como
+# está. "no" no significa lo mismo acá que en la pregunta de un objetivo, por
+# eso la rama de categorías se resuelve antes.
+_DEJARLO = frozenset(
+    {
+        "no", "dejalo", "dejala", "dejar", "otros", "esta bien", "asi esta bien",
+        "ninguna", "ninguno", "nada", "cancelar", "no importa", "da igual",
+    }
+)
+
+# Vacían la cola entera. Encadenar cuatro preguntas después de un cierre del día
+# sin una salida sería insoportable.
+_DEJAR_TODO = frozenset(
+    {
+        "dejalo todo", "deja todo", "dejalos", "dejalos en otros", "todo en otros",
+        "deja todo en otros", "dejalo todo en otros", "basta", "listo", "despues",
+        "despues veo", "ya fue",
+    }
+)
+
+
+def _texto_pregunta_categoria(pendiente) -> str:
+    """La pregunta por una categoría que no existe todavía."""
+    opciones = "\n".join(
+        f"  {i}. {c.get('emoji') or ''} {c['nombre']}".replace("  ", " ").rstrip()
+        for i, c in enumerate(pendiente.candidatos, start=1)
+    )
+
+    cabeza = f"«{pendiente.mencion}» ¿dónde va?"
+    if pendiente.restantes:
+        cabeza += f"  (quedan {pendiente.restantes} después de esta)"
+
+    pie = (
+        f"Contestame con el número, «creá {pendiente.mencion}» para tener una "
+        "categoría nueva, o «dejalo» para que quede en «otros»."
+    )
+
+    return "\n".join([cabeza, opciones, "", pie]) if opciones else f"{cabeza}\n{pie}"
+
+
+async def _abrir_preguntas_categoria(
+    chat_id: int,
+    faltantes: list[tuple[int, str, TipoMovimiento]],
+    vocabulario: Vocabulario,
+    user_id: str,
+    moneda: Moneda,
+) -> str:
+    """Deja abierta la pregunta por las categorías que no encajaron en ninguna.
+
+    Los movimientos ya están guardados en «otros»: si el usuario no contesta, no
+    se pierde nada. Lo que devuelve se pega debajo de la confirmación.
+    """
+    if not faltantes:
+        return ""
+
+    recortadas = faltantes[: pendientes.TOPE_COLA]
+
+    # Las opciones que se ofrecen salen de lo que el usuario más usa. Se pide
+    # una vez por tipo, no una por pregunta.
+    frecuentes: dict[TipoMovimiento, tuple[str, ...]] = {}
+    for _, _, tipo in recortadas:
+        if tipo not in frecuentes:
+            try:
+                frecuentes[tipo] = await run_in_threadpool(
+                    categorias_frecuentes, user_id=user_id, tipo=tipo
+                )
+            except Exception:
+                logger.warning("No pude leer las categorías frecuentes", exc_info=True)
+                frecuentes[tipo] = ()
+
+    preguntas = [
+        {
+            "movimiento_id": movimiento_id,
+            "mencion": mencion,
+            "datos": {"tipo": tipo.value},
+            "candidatos": [
+                {"nombre": c.nombre, "emoji": c.emoji}
+                for c in vocabulario.mas_cercanas(
+                    mencion, tipo, frecuentes.get(tipo, ())
+                )
+            ],
+        }
+        for movimiento_id, mencion, tipo in recortadas
+    ]
+
+    primera = preguntas[0]
+    pendiente = pendientes.Pendiente(
+        tipo="categoria",
+        movimiento_id=primera["movimiento_id"],
+        mencion=primera["mencion"],
+        moneda=moneda.value,
+        candidatos=primera["candidatos"],
+        cola=preguntas[1:],
+        datos=primera["datos"],
+    )
+    pendientes.guardar(chat_id, pendiente)
+
+    sobrantes = len(faltantes) - len(preguntas)
+    aviso = (
+        f"\n\n(Otros {sobrantes} quedaron en «otros», eran demasiados para "
+        "preguntar de a uno.)"
+        if sobrantes > 0
+        else ""
+    )
+
+    return f"\n\n{_texto_pregunta_categoria(pendiente)}{aviso}"
+
+
+async def _siguiente_pregunta(chat_id: int, pendiente, confirmacion: str) -> str:
+    """Confirma lo que se hizo y pasa a la siguiente pregunta, si queda alguna."""
+    if pendiente.avanzar():
+        pendientes.guardar(chat_id, pendiente)
+        return f"{confirmacion}\n\n{_texto_pregunta_categoria(pendiente)}"
+
+    pendientes.olvidar(chat_id)
+    return confirmacion
+
+
+async def _resolver_pendiente_categoria(
+    chat_id: int, pendiente, texto: str, user_id: str
+) -> str | None:
+    """Contesta a dónde iba el gasto, o None si el mensaje no contestaba eso."""
+    clave = normalizar(texto)
+    try:
+        tipo = TipoMovimiento(pendiente.datos.get("tipo", "gasto"))
+    except ValueError:
+        tipo = TipoMovimiento.GASTO
+
+    if clave in _DEJAR_TODO:
+        pendientes.olvidar(chat_id)
+        return "Listo, lo dejo todo en «otros» 👍"
+
+    if clave in _DEJARLO:
+        return await _siguiente_pregunta(
+            chat_id, pendiente, f"Listo, «{pendiente.mencion}» queda en «otros» 👍"
+        )
+
+    elegido = _elegir_candidato(pendiente, clave)
+    if elegido is not None:
+        await run_in_threadpool(
+            recategorizar_movimiento,
+            pendiente.movimiento_id,
+            elegido["nombre"],
+            user_id=user_id,
+        )
+        etiqueta = f"{elegido.get('emoji') or ''} {elegido['nombre']}".strip()
+        return await _siguiente_pregunta(chat_id, pendiente, f"Listo, va a {etiqueta} ✅")
+
+    vocabulario = await run_in_threadpool(_vocabulario, user_id)
+
+    # Crear exige el verbo ("creá cerámica"). Un nombre suelto solo se empareja
+    # contra lo que ya existe: si no, cualquier mensaje que caiga mientras la
+    # pregunta está abierta terminaría siendo una categoría.
+    nueva = leer_creacion(texto, pendiente.mencion)
+    if nueva is not None:
+        ya_existe = vocabulario.resolver(nueva, tipo)
+        if ya_existe is None:
+            if len(vocabulario.propias()) >= TOPE_PROPIAS:
+                return await _siguiente_pregunta(
+                    chat_id,
+                    pendiente,
+                    f"Ya tenés {TOPE_PROPIAS} categorías propias, que son "
+                    "bastantes 😅 Borrá alguna que no uses y volvé a intentar. "
+                    f"«{pendiente.mencion}» queda en «otros» por ahora.",
+                )
+            try:
+                await run_in_threadpool(
+                    crear_categoria, user_id=user_id, nombre=nueva, tipo=tipo
+                )
+            except DBError as exc:
+                logger.warning("No pude crear la categoría %r: %s", nueva, exc)
+                return await _siguiente_pregunta(
+                    chat_id,
+                    pendiente,
+                    f"No pude crear «{nueva}» 😕 Queda en «otros».",
+                )
+            confirmacion = f"Listo ✏️ Creé «{nueva}» y le puse ahí el movimiento."
+        else:
+            nueva = ya_existe.nombre
+            confirmacion = f"Esa ya la tenías: lo puse en {ya_existe.etiqueta} ✅"
+
+        await run_in_threadpool(
+            recategorizar_movimiento, pendiente.movimiento_id, nueva, user_id=user_id
+        )
+        return await _siguiente_pregunta(chat_id, pendiente, confirmacion)
+
+    encontrada = vocabulario.resolver(texto, tipo)
+    if encontrada is not None:
+        await run_in_threadpool(
+            recategorizar_movimiento,
+            pendiente.movimiento_id,
+            encontrada.nombre,
+            user_id=user_id,
+        )
+        return await _siguiente_pregunta(
+            chat_id, pendiente, f"Listo, va a {encontrada.etiqueta} ✅"
+        )
+
+    return None
+
+
+async def _resolver_pendiente_borrado(
+    chat_id: int, pendiente, texto: str, user_id: str
+) -> str | None:
+    """Confirma el borrado de una categoría que tiene movimientos usándola."""
+    clave = normalizar(texto)
+    nombre = pendiente.mencion
+    try:
+        tipo = TipoMovimiento(pendiente.datos.get("tipo", "gasto"))
+    except ValueError:
+        tipo = TipoMovimiento.GASTO
+
+    mover = clave in {
+        "pasalos a otros", "pasalos", "pasalos todos", "moverlos", "movelos",
+        "a otros", "pasar a otros", "mandalos a otros",
+    }
+    borrar = clave in {
+        "borrala", "borralo", "borra", "borrar", "si", "dale", "sisi", "obvio",
+        "borrala igual", "igual", "confirmo",
+    }
+
+    if clave in _DEJARLO or clave in _DEJAR_TODO:
+        pendientes.olvidar(chat_id)
+        return f"Listo, «{nombre}» se queda 👍"
+
+    if not (mover or borrar):
+        return None
+
+    pendientes.olvidar(chat_id)
+    movidos = 0
+
+    try:
+        if mover:
+            movidos = await run_in_threadpool(
+                recategorizar_todos,
+                user_id=user_id,
+                tipo=tipo,
+                desde=nombre,
+                hacia="otros",
+            )
+        await run_in_threadpool(
+            borrar_categoria, user_id=user_id, nombre=nombre, tipo=tipo
+        )
+    except DBError as exc:
+        logger.warning("No pude borrar la categoría %r: %s", nombre, exc)
+        return f"No pude borrarla 😕\n{exc}"
+
+    if movidos:
+        return (
+            f"Listo 🗑 Borré «{nombre}» y pasé {movidos} "
+            f"{'movimiento' if movidos == 1 else 'movimientos'} a «otros»."
+        )
+    return (
+        f"Listo 🗑 Borré «{nombre}». Los movimientos que ya la usaban quedan "
+        "como están, así que tus gráficos no cambian."
+    )
+
+
+async def _resolver_gestion_categorias(
+    gestion: GestionCategoria, vocabulario: Vocabulario, chat_id: int, user_id: str
+) -> str:
+    """Listar, crear o borrar categorías. Es lo único que las escribe."""
+    if gestion.accion is AccionCategoria.LISTAR or not gestion.nombre:
+        return formatear_listado(vocabulario)
+
+    if gestion.accion is AccionCategoria.CREAR:
+        return await _crear_categoria(gestion.nombre, gestion.tipo, vocabulario, user_id)
+
+    return await _borrar_categoria(
+        gestion.nombre, gestion.tipo, vocabulario, chat_id, user_id
+    )
+
+
+async def _crear_categoria(
+    nombre: str, tipo: TipoMovimiento, vocabulario: Vocabulario, user_id: str
+) -> str:
+    """Da de alta una categoría propia, si no existía ya."""
+    ya_existe = vocabulario.resolver(nombre, tipo)
+    if ya_existe is not None:
+        dueño = "tuya" if ya_existe.propia else "de las que vienen por defecto"
+        return (
+            f"Esa ya la tenés: {ya_existe.etiqueta} ({dueño}).\n"
+            "Usala tranquilo, la voy a reconocer."
+        )
+
+    if len(vocabulario.propias()) >= TOPE_PROPIAS:
+        return (
+            f"Ya tenés {TOPE_PROPIAS} categorías propias, que son bastantes 😅\n"
+            "Borrá alguna que no uses y volvé a intentar."
+        )
+
+    try:
+        await run_in_threadpool(
+            crear_categoria, user_id=user_id, nombre=nombre, tipo=tipo
+        )
+    except DBError as exc:
+        logger.warning("No pude crear la categoría %r: %s", nombre, exc)
+        return f"No pude crear la categoría 😕\n{exc}"
+
+    ejemplo = {
+        TipoMovimiento.GASTO: f"«pagué 25 lucas de {nombre}»",
+        TipoMovimiento.INGRESO: f"«cobré 50 mil de {nombre}»",
+        TipoMovimiento.AHORRO: f"«aparté 30 mil en {nombre}»",
+        TipoMovimiento.INVERSION: f"«puse 100 mil en {nombre}»",
+    }[tipo]
+
+    return (
+        f"Listo ✏️ Creé la categoría «{nombre}».\n"
+        f"Es tuya y solo la ves vos. Ya la puedo usar: probá con {ejemplo}."
+    )
+
+
+async def _borrar_categoria(
+    nombre: str,
+    tipo: TipoMovimiento,
+    vocabulario: Vocabulario,
+    chat_id: int,
+    user_id: str,
+) -> str:
+    """Baja una categoría propia, avisando si hay movimientos que la usan."""
+    encontrada = vocabulario.resolver(nombre, tipo)
+
+    if encontrada is None:
+        propias = vocabulario.propias()
+        if not propias:
+            return (
+                f"No tengo ninguna categoría que se llame «{nombre}» 🤔\n"
+                "Y no tenés ninguna propia todavía: las que vienen por defecto "
+                "no se borran."
+            )
+        lista = " · ".join(c.nombre for c in propias)
+        return (
+            f"No tengo ninguna categoría que se llame «{nombre}» 🤔\n"
+            f"Las tuyas son: {lista}"
+        )
+
+    if not encontrada.propia:
+        return (
+            f"{encontrada.etiqueta} es una de las categorías base, esas no se "
+            "borran 🙂\nSolo podés borrar las que creaste vos."
+        )
+
+    cantidad, totales = await run_in_threadpool(
+        uso_de_categoria, user_id=user_id, categoria=encontrada.nombre, tipo=tipo
+    )
+
+    if not cantidad:
+        try:
+            await run_in_threadpool(
+                borrar_categoria, user_id=user_id, nombre=encontrada.nombre, tipo=tipo
+            )
+        except DBError as exc:
+            logger.warning("No pude borrar la categoría %r: %s", nombre, exc)
+            return f"No pude borrarla 😕\n{exc}"
+        return f"Listo 🗑 Borré «{encontrada.nombre}». No la estaba usando nada."
+
+    pendientes.guardar(
+        chat_id,
+        pendientes.Pendiente(
+            tipo="borrar_categoria",
+            movimiento_id=0,
+            mencion=encontrada.nombre,
+            moneda=Moneda.ARS.value,
+            datos={"tipo": tipo.value},
+        ),
+    )
+
+    plata = " · ".join(
+        _formatear_monto(monto, moneda)
+        for moneda, monto in sorted(totales.items(), key=lambda kv: kv[0].value)
+    )
+
+    return (
+        f"Tenés {cantidad} {'movimiento' if cantidad == 1 else 'movimientos'} en "
+        f"«{encontrada.nombre}» por {plata} 🤔\n"
+        "Si la borro, esos movimientos quedan igual y los gráficos no cambian: "
+        "solo dejo de ofrecerla para los nuevos.\n\n"
+        "Decime «borrala» para eso, «pasalos a otros» si querés además "
+        "reetiquetarlos, o «dejalo» para no tocar nada."
+    )
+
+
 async def _resolver_pendiente(
     chat_id: int, pendiente, texto: str, user_id: str
 ) -> str | None:
     """Contesta la pregunta abierta, o None si el mensaje no la contestaba."""
     respuesta = texto.strip().lower()
+
+    # Las de categoría van primero: ahí "no" quiere decir "dejalo en otros", no
+    # "dejalo sin objetivo", y la respuesta sería confusa.
+    if pendiente.tipo == "categoria":
+        return await _resolver_pendiente_categoria(chat_id, pendiente, texto, user_id)
+
+    if pendiente.tipo == "borrar_categoria":
+        return await _resolver_pendiente_borrado(chat_id, pendiente, texto, user_id)
 
     if respuesta in {"no", "ninguno", "ninguna", "nada", "cancelar", "dejalo", "no importa"}:
         pendientes.olvidar(chat_id)

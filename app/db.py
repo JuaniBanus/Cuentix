@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -24,6 +25,7 @@ TABLA_RETOS = "retos"
 TABLA_RENDIMIENTOS = "rendimientos_billeteras"
 TABLA_VINCULOS = "usuarios_telegram"
 TABLA_PERFILES = "perfiles"
+TABLA_CATEGORIAS = "categorias"
 
 PAGINA = 1000
 
@@ -49,6 +51,9 @@ def _a_decimal(valor: Any) -> Decimal:
     if not isinstance(valor, Decimal):
         valor = Decimal(str(valor))
     return valor.quantize(_CENTAVOS)
+
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
 
 def _exigir(user_id: str) -> str:
@@ -268,6 +273,182 @@ def guardar_movimiento(
     if not respuesta.data:
         raise DBError("El insert no devolvió la fila creada.")
     return int(respuesta.data[0]["id"])
+
+
+def obtener_categorias(*, user_id: str) -> list[dict]:
+    """Las categorías que ese usuario puede usar: las base más las suyas.
+
+    Las base son las filas con user_id nulo (019_categorias.sql). Van en la
+    misma consulta que las propias porque el bot las necesita juntas en cada
+    mensaje, para armar la lista que ve Gemini.
+    """
+    user_id = _exigir(user_id)
+    if not _UUID.match(user_id):
+        # El filtro `or` de PostgREST se arma como texto, así que el user_id se
+        # interpola. Viene de la tabla de vínculos y nunca del usuario, pero un
+        # valor raro acá sería un filtro roto: mejor cortar antes.
+        raise DBError(f"El user_id no tiene forma de uuid: {user_id!r}")
+
+    try:
+        filas = (
+            _obtener_cliente()
+            .table(TABLA_CATEGORIAS)
+            .select("id, user_id, nombre, tipo, emoji")
+            .or_(f"user_id.is.null,user_id.eq.{user_id}")
+            .execute()
+        ).data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la consulta de categorías: %s", detalle)
+        raise DBError(f"No pude leer las categorías: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red consultando categorías")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return filas
+
+
+def crear_categoria(*, user_id: str, nombre: str, tipo: TipoMovimiento) -> dict:
+    """Crea una categoría propia y devuelve la fila.
+
+    El user_id va siempre: una fila con user_id nulo sería una categoría BASE,
+    visible para todos los usuarios del sistema.
+    """
+    fila = {
+        "user_id": _exigir(user_id),
+        "nombre": nombre,
+        "tipo": tipo.value,
+    }
+
+    try:
+        respuesta = _obtener_cliente().table(TABLA_CATEGORIAS).insert(fila).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la categoría: %s", detalle)
+        raise DBError(f"No pude crear la categoría: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red creando la categoría")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    if not respuesta.data:
+        raise DBError("El insert de la categoría no devolvió la fila creada.")
+    return respuesta.data[0]
+
+
+def borrar_categoria(*, user_id: str, nombre: str, tipo: TipoMovimiento) -> int:
+    """Borra una categoría propia. Devuelve cuántas filas se llevó (0 o 1).
+
+    El filtro por user_id no es decorativo: sin él esto borraría la categoría
+    base de todos los usuarios.
+    """
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA_CATEGORIAS)
+            .delete()
+            .eq("user_id", _exigir(user_id))
+            .eq("tipo", tipo.value)
+            .eq("nombre", nombre)
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el borrado de la categoría: %s", detalle)
+        raise DBError(f"No pude borrar la categoría: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red borrando la categoría")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return len(respuesta.data or [])
+
+
+def uso_de_categoria(
+    *, user_id: str, categoria: str, tipo: TipoMovimiento
+) -> tuple[int, dict[Moneda, Decimal]]:
+    """Cuántos movimientos usan esa etiqueta y por cuánto, para avisar al borrar."""
+    filas = _seleccionar(
+        "monto,moneda", user_id=user_id, tipo=tipo, categoria=categoria
+    )
+
+    totales: dict[Moneda, Decimal] = {}
+    for fila in filas:
+        moneda = Moneda(fila["moneda"])
+        totales[moneda] = totales.get(moneda, Decimal("0")) + _a_decimal(fila["monto"])
+
+    return len(filas), totales
+
+
+def categorias_frecuentes(
+    *, user_id: str, tipo: TipoMovimiento, limite: int = 3, mirar_ultimos: int = 300
+) -> tuple[str, ...]:
+    """Las etiquetas que el usuario más viene usando, de mayor a menor.
+
+    Es lo que se le ofrece cuando un gasto no encaja en ninguna categoria: el
+    parecido letra a letra no sirve para sugerir, y lo que ya usa si.
+
+    Mira solo los ultimos movimientos y no el historial entero: una consulta
+    acotada alcanza para saber que usa, y esto corre en medio de una respuesta.
+    """
+    filas = _seleccionar(
+        "categoria",
+        user_id=user_id,
+        tipo=tipo,
+        ordenar_reciente=True,
+        limite=mirar_ultimos,
+    )
+
+    cuenta: dict[str, int] = {}
+    for fila in filas:
+        etiqueta = (fila.get("categoria") or "").strip().lower()
+        if etiqueta and etiqueta != "otros":
+            cuenta[etiqueta] = cuenta.get(etiqueta, 0) + 1
+
+    ordenadas = sorted(cuenta.items(), key=lambda par: (-par[1], par[0]))
+    return tuple(nombre for nombre, _ in ordenadas[:limite])
+
+
+def recategorizar_movimiento(movimiento_id: int, categoria: str, *, user_id: str) -> None:
+    """Le cambia la etiqueta a un movimiento ya guardado.
+
+    Es lo que corre cuando el usuario contesta a dónde iba un gasto que el bot
+    había dejado en "otros" mientras preguntaba.
+    """
+    try:
+        _obtener_cliente().table(TABLA).update({"categoria": categoria}).eq(
+            "id", movimiento_id
+        ).eq("user_id", _exigir(user_id)).execute()
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la recategorización: %s", detalle)
+        raise DBError(f"No pude cambiarle la categoría: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red recategorizando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def recategorizar_todos(
+    *, user_id: str, tipo: TipoMovimiento, desde: str, hacia: str
+) -> int:
+    """Mueve todos los movimientos de una etiqueta a otra. Devuelve cuántos."""
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA)
+            .update({"categoria": hacia})
+            .eq("user_id", _exigir(user_id))
+            .eq("tipo", tipo.value)
+            .eq("categoria", desde)
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la recategorización masiva: %s", detalle)
+        raise DBError(f"No pude mover los movimientos: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red moviendo los movimientos")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return len(respuesta.data or [])
 
 
 def obtener_objetivos(*, user_id: str, solo_activos: bool = True) -> list[dict]:

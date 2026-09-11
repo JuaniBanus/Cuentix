@@ -81,6 +81,22 @@ usuario, se rompió la garantía.
 **Ninguna función de `app/db.py` tiene `user_id` con valor por defecto.** Un
 default convierte un olvido en una consulta que devuelve datos de todos.
 
+**La categoría sale de una lista cerrada, y el que la cierra es Python.** El
+prompt le pasa a Gemini las categorías del usuario y le pide que elija una,
+pero la garantía es `Vocabulario.resolver()` (`app/categorias.py`): lo que no
+está en la lista no llega a la base, cae en «otros» y el bot pregunta. Si
+alguna vez el valor del modelo se escribe sin pasar por ahí, se rompió.
+
+**`categorias.user_id` no lleva `default auth.uid()`.** Es al revés que en
+`movimientos`, y a propósito: el bot escribe con `service_role`, donde
+`auth.uid()` es NULL, así que un olvido no crearía una categoría privada sino
+una **base, visible para todos los usuarios**. Sin default, el insert falla.
+
+**La clave anon solo lee `categorias`.** La gestión es del bot. Las policies de
+insert/update/delete están escritas y son correctas, pero el `grant` de
+escritura no se otorgó: habilitar el ABM en la web es agregarlo, no reescribir
+las reglas.
+
 **`esc()` cubre los cinco caracteres** (`& < > " '`), porque se usa tanto en
 texto como dentro de atributos. Quitar cualquiera abre XSS por atributo.
 

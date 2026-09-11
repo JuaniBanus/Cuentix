@@ -47,10 +47,29 @@ class Intencion(str, Enum):
     SIMULAR_COMPRA = "simular_compra"
     COMPARAR_CUOTAS = "comparar_cuotas"
     CONSULTA_LIBRE = "consulta_libre"
+    GESTIONAR_CATEGORIAS = "gestionar_categorias"
     TOTAL_POR_TIPO = "total_por_tipo"
     TOTAL_POR_CATEGORIA = "total_por_categoria"
     BALANCE = "balance"
     DESCONOCIDA = "desconocida"
+
+
+class AccionCategoria(str, Enum):
+    """Qué quiso hacer el usuario con su lista de categorías."""
+
+    CREAR = "crear"
+    LISTAR = "listar"
+    BORRAR = "borrar"
+
+
+class GestionCategoria(BaseModel):
+    """Un pedido de alta, baja o listado de categorías."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    accion: AccionCategoria
+    nombre: str | None = Field(default=None, max_length=60)
+    tipo: TipoMovimiento = TipoMovimiento.GASTO
 
 
 class Movimiento(BaseModel):

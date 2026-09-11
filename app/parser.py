@@ -13,8 +13,10 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
+from app.categorias import Vocabulario, nombre_valido
 from app.config import GEMINI_API_KEY
 from app.models import (
+    AccionCategoria,
     Agregacion,
     Alerta,
     BasePromedio,
@@ -23,6 +25,7 @@ from app.models import (
     DiaSemana,
     Dimension,
     Financiacion,
+    GestionCategoria,
     Intencion,
     Inversion,
     Moneda,
@@ -64,7 +67,12 @@ class _MovimientoExtraido(BaseModel):
     tipo: TipoMovimiento
     monto: float
     moneda: Moneda = Moneda.ARS
-    categoria: str
+    # Una de las categorías del usuario, o null si ninguna encaja. Lo que llegue
+    # acá pasa igual por Vocabulario.resolver(): el prompt sugiere, el código
+    # decide.
+    categoria: str | None = None
+    # Cómo la llamaría el usuario, cuando pide una que no existe todavía.
+    categoria_nueva: str | None = None
     descripcion: str
     cuenta: str | None = None
     comercio: str | None = None
@@ -112,6 +120,7 @@ class _MovimientoItem(BaseModel):
     monto: float | None = None
     moneda: Moneda | None = None
     categoria: str | None = None
+    categoria_nueva: str | None = None
     descripcion: str | None = None
     cuenta: str | None = None
     fragmento: str | None = None
@@ -155,6 +164,12 @@ class _FinanciacionExtraida(BaseModel):
     tasa_mensual_pct: float | None = None
 
 
+class _CategoriaExtraida(BaseModel):
+    accion: AccionCategoria
+    nombre: str | None = None
+    tipo: TipoMovimiento = TipoMovimiento.GASTO
+
+
 class _InterpretacionExtraida(BaseModel):
     intencion: Intencion
     movimiento: _MovimientoExtraido | None = None
@@ -167,6 +182,7 @@ class _InterpretacionExtraida(BaseModel):
     inversiones: list[_InversionExtraida] | None = None
     cierre: _CierreExtraido | None = None
     alerta: _AlertaExtraida | None = None
+    categoria: _CategoriaExtraida | None = None
 
 
 class Interpretacion(NamedTuple):
@@ -187,16 +203,28 @@ class Interpretacion(NamedTuple):
     alerta: Alerta | None = None
     objetivo: str | None = None
     faltantes: tuple[str, ...] = ()
+    gestion: GestionCategoria | None = None
+    # Lo que el usuario parece haber querido etiquetar cuando nada de su lista
+    # encajaba. El movimiento ya quedó en "otros"; esto es lo que hay que
+    # preguntarle. Para un mensaje con varios, `sin_categoria` dice además a qué
+    # posición de `movimientos` corresponde cada pregunta.
+    categoria_nueva: str | None = None
+    sin_categoria: tuple[tuple[int, str], ...] = ()
 
 
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
 
-def _instruccion_sistema(hoy: date) -> str:
-    """Prompt de sistema. Recibe la fecha para resolver referencias relativas."""
+def _instruccion_sistema(hoy: date, vocabulario: Vocabulario) -> str:
+    """Prompt de sistema.
+
+    Recibe la fecha para resolver referencias relativas y el vocabulario del
+    usuario, que se inyecta entero: la IA elige de esa lista y no inventa.
+    """
     ayer = hoy - timedelta(days=1)
     dia = _DIAS[hoy.weekday()]
     inicio_mes = hoy.replace(day=1)
+    lista_categorias = vocabulario.para_prompt()
     return f"""\
 Sos un asistente de finanzas personales. El usuario es argentino y escribe en
 español rioplatense, de forma coloquial y abreviada.
@@ -273,11 +301,23 @@ arruinaría justamente la medición que habilitan.
   null: el sistema divide solo.
 
 CATEGORIA
-- Una o dos palabras, en minúsculas, sin tildes ni signos.
-- Reutilizá etiquetas comunes: supermercado, comida, transporte, alquiler,
-  servicios, salud, educacion, ocio, ropa, sueldo, freelance, dolares,
-  cripto, plazo fijo, otros.
-- Si nada encaja, usá "otros".
+Esta es la lista del usuario. Es CERRADA: no inventes ninguna.
+{lista_categorias}
+
+- Elegí UNA y copiala tal cual, sin cambiarle una letra.
+- Tiene que ser del MISMO tipo que el movimiento: un gasto no puede quedar en
+  una categoría de ingreso.
+- Si ninguna encaja de verdad, dejá categoria=null y escribí en
+  categoria_nueva el nombre corto que le pondrías (una o dos palabras, en
+  minúsculas y sin tildes). El sistema le va a preguntar al usuario.
+- NO uses "otros" para zafar. "otros" es para lo que de verdad no tiene rubro
+  (un gasto suelto, algo inclasificable). Si dudás entre "otros" y pedir una
+  nueva, poné null: preguntar es mejor que etiquetar mal.
+- Ejemplos con la lista de arriba:
+  "gasté 8 lucas en el super"      -> supermercado
+  "pagué 45 mil de luz"            -> servicios
+  "cargué 30 de nafta"             -> nafta
+  "12 mil del taller de cerámica"  -> categoria=null, categoria_nueva="ceramica"
 
 CUENTA (dónde está la plata)
 - Completala SOLO si el mensaje dice dónde quedó, de dónde salió o a dónde fue
@@ -345,7 +385,9 @@ CUÁNDO ES UNO Y CUÁNDO SON VARIOS
   un mensaje puede traer dos gastos y un ingreso.
 
 CADA ÍTEM
-- Las mismas reglas de montos, moneda, tipo, fecha y categoría de arriba.
+- Las mismas reglas de montos, moneda, tipo, fecha y categoría de arriba,
+  incluida la de la lista cerrada: categoria de la lista, o null con
+  categoria_nueva si ninguna encaja.
 - descripcion: la etiqueta corta de ESE ítem ("café", "nafta"), no del mensaje.
 - fragmento: el pedacito del mensaje del que sacaste el ítem, copiado tal cual
   ("2 en un café"). Sirve para poder citarlo si hay que preguntar.
@@ -367,8 +409,8 @@ en "duda" qué necesitás, en una frase corta y tuteando:
   duda: "¿los 2 del café son 2 mil o 2 pesos?"
 Los demás ítems del mismo mensaje se completan igual: la duda de uno NUNCA
 vacía a los otros. Un ítem con duda no lleva monto inventado.
-No uses "duda" para lo que se puede deducir: la categoría siempre se puede
-elegir, y ante la duda es "otros".
+No uses "duda" para la categoría: para eso está categoria_nueva. "duda" es
+solo para los montos y para cuando no se entiende qué pasó.
 
 ====================== SI ES UNA COMPRA DE INVERSIÓN =====================
 Poné intencion="registrar_inversion" y completá "inversion". El resto en null.
@@ -534,9 +576,9 @@ CAMPOS
 - moneda: como siempre, ARS si no se aclara.
 - que: qué es, corto y con las palabras del usuario ("unas zapatillas",
   "una tele", "un viaje a Brasil"). Sin el precio adentro.
-- categoria: el rubro al que caería si la hiciera, con las mismas etiquetas de
-  siempre (ropa, tecnologia, ocio, viaje...). Sirve para comparar contra lo
-  que ya gasta ahí. Si no encaja en ninguna, null.
+- categoria: el rubro de la lista de arriba al que caería si la hiciera.
+  Sirve para comparar contra lo que ya gasta ahí. Acá no se pregunta nada: si
+  ninguna encaja, poné null y listo.
 
 ==================== SI ES UNA PREGUNTA ANALÍTICA LIBRE ==================
 Poné intencion="consulta_libre" y completá "plan". El resto en null.
@@ -561,7 +603,9 @@ CÓMO SE ARMA EL PLAN
   "¿en qué gasto?" -> categoria      "¿qué día gasto más?" -> dia_semana
   "¿cómo vengo mes a mes?" -> mes    "¿dónde compro más?" -> comercio
 - tipo / moneda: filtran. null = sin filtrar.
-- categoria: el nombre exacto del rubro, si la pregunta lo nombra.
+- categoria: el nombre exacto de la lista, si la pregunta nombra un rubro.
+  Traducí lo que dijo el usuario a la etiqueta de la lista: "en el súper" ->
+  supermercado, "de luz" -> servicios. Si no nombra ninguno, null.
 - comercio: texto a buscar DENTRO de la descripción del movimiento, cuando
   pregunta por un lugar o comercio ("¿cuánto gasté en Starbucks?" -> "starbucks").
   No lo uses para rubros generales: "supermercado" es categoria, no comercio.
@@ -610,9 +654,43 @@ FILTROS DE LA CONSULTA
   "en total", "histórico"). NO inventes un rango si el usuario no lo pidió.
 - Si la pregunta habla del mes sin aclarar cuál, usá el mes en curso.
 - tipo, moneda, categoria: completalos solo si la pregunta los menciona.
-  En null significa "sin filtrar por eso".
+  En null significa "sin filtrar por eso". La categoría va con el nombre exacto
+  de la lista de arriba, no con la palabra que usó el usuario.
 - etiqueta_periodo: cómo nombrar el período en la respuesta, en minúsculas.
   Ejemplos: "este mes", "en julio", "este año", "en total", "la semana pasada".
+
+================== SI QUIERE TOCAR SUS CATEGORIAS ========================
+Poné intencion="gestionar_categorias" y completá "categoria". El resto en null.
+
+Es cuando el mensaje habla de la LISTA en sí, no de plata que se movió.
+La señal es que nombra la palabra "categoría" refiriéndose a la etiqueta, o
+pide ver/crear/borrar un rubro sin que haya ningún monto.
+
+- accion="listar": quiere ver las que tiene.
+  "¿qué categorías tengo?" · "mostrame mis categorías" · "mis rubros"
+- accion="crear": quiere una nueva.
+  "creá la categoría cerámica" -> nombre="ceramica"
+  "agregá una categoría para mis clases de yoga" -> nombre="yoga"
+  "quiero una categoría de peluquería" -> nombre="peluqueria"
+  "necesito una para el taller de carpintería" -> nombre="carpinteria"
+- accion="borrar": no la quiere más.
+  "borrá la categoría cerámica" -> nombre="ceramica"
+  "sacá la de yoga" · "no uso más la categoría gimnasio"
+
+CAMPOS
+- nombre: una o dos palabras, minúsculas, sin tildes, en singular. Sacale el
+  "la", el "para", el "mis" y el verbo: "una categoría para mis clases de yoga"
+  es "yoga", no "clases de yoga" ni "mis clases de yoga".
+  En accion="listar" va null.
+- tipo: para qué clase de movimiento es. Casi siempre "gasto", que es el
+  default. Usá otro solo si el mensaje lo dice ("una categoría de ingreso para
+  los alquileres" -> tipo=ingreso).
+
+OJO, ESTO NO ES UN REGISTRO
+  "gasté 12 lucas en cerámica"   -> registrar (hay plata de por medio)
+  "creá la categoría cerámica"   -> gestionar_categorias
+Si hay un monto, es un registro, aunque nombre un rubro que no existe: para eso
+está categoria_nueva.
 
 ======================= SI NO ES NINGUNA DE LAS DOS =====================
 Poné intencion="desconocida" con los dos objetos en null. Usalo para saludos,
@@ -650,30 +728,60 @@ def _normalizar_cuenta(valor: str | None) -> str | None:
     return limpio
 
 
-def _a_movimiento(extraido: _MovimientoExtraido) -> Movimiento:
-    """Convierte la salida de Gemini en el Movimiento definitivo."""
+def _categoria_de(
+    extraido, tipo: TipoMovimiento, vocabulario: Vocabulario
+) -> tuple[str, str | None]:
+    """(categoría con la que se guarda, mención por la que hay que preguntar).
+
+    Acá se cierra la lista. Lo que devolvió Gemini vale solo si existe de verdad
+    en el vocabulario del usuario; si no, el movimiento queda en "otros" y la
+    mención viaja hasta el bot para que pregunte. Nunca se crea una categoría
+    sin que el usuario la pida.
+    """
+    elegida = vocabulario.resolver(extraido.categoria, tipo)
+    if elegida is not None:
+        return elegida.nombre, None
+
+    mencion = extraido.categoria_nueva or extraido.categoria
+
+    # El modelo a veces propone como "nueva" algo que ya existe con otro nombre
+    # ("verdulería" cuando tiene "supermercado"). Vale la pena mirar antes de
+    # molestar al usuario.
+    elegida = vocabulario.resolver(mencion, tipo)
+    if elegida is not None:
+        return elegida.nombre, None
+
+    return vocabulario.otros(tipo), nombre_valido(mencion)
+
+
+def _a_movimiento(
+    extraido: _MovimientoExtraido, vocabulario: Vocabulario
+) -> tuple[Movimiento, str | None]:
+    """El Movimiento definitivo, y qué categoría habría que preguntar (o None)."""
     try:
         monto = Decimal(str(extraido.monto)).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError) as exc:
         raise ParserError(f"Gemini devolvió un monto inusable: {extraido.monto!r}") from exc
 
-    categoria = extraido.categoria.strip().lower()
+    categoria, mencion = _categoria_de(extraido, extraido.tipo, vocabulario)
 
     descripcion = " ".join(extraido.descripcion.split()).lower()[:60].strip()
 
     try:
-        return Movimiento(
+        movimiento = Movimiento(
             fecha=extraido.fecha,
             tipo=extraido.tipo,
             monto=monto,
             moneda=extraido.moneda,
             categoria=categoria,
-            descripcion=descripcion or categoria,
+            descripcion=descripcion or mencion or categoria,
             cuenta=_normalizar_cuenta(extraido.cuenta),
             **_datos_de_precio(extraido, monto),
         )
     except ValidationError as exc:
         raise ParserError(f"Gemini devolvió un movimiento inválido: {exc.errors()}") from exc
+
+    return movimiento, mencion
 
 
 _ETIQUETA_FALTANTE = {
@@ -824,11 +932,17 @@ def _a_alerta(extraida: _AlertaExtraida | None) -> tuple[Alerta | None, tuple[st
 
 
 def _a_movimientos(
-    items: list[_MovimientoItem] | None, hoy: date
-) -> tuple[list[Movimiento], tuple[tuple[str, str], ...]]:
-    """Separa los ítems completos de los que hay que preguntar."""
+    items: list[_MovimientoItem] | None, hoy: date, vocabulario: Vocabulario
+) -> tuple[list[Movimiento], tuple[tuple[str, str], ...], tuple[tuple[int, str], ...]]:
+    """Separa los ítems completos de los que hay que preguntar.
+
+    Devuelve además, para los que no encajaron en ninguna categoría, la posición
+    que ocupan en la lista de completos y qué habría que preguntar. La posición
+    hace falta porque el id del movimiento recién existe después de guardarlo.
+    """
     completos: list[Movimiento] = []
     dudas: list[tuple[str, str]] = []
+    sin_categoria: list[tuple[int, str]] = []
 
     for indice, item in enumerate(items or [], start=1):
         cita = (item.fragmento or item.descripcion or f"ítem {indice}").strip()
@@ -843,26 +957,29 @@ def _a_movimientos(
             dudas.append((cita, "¿fue un gasto, un ingreso o un ahorro?"))
             continue
 
-        categoria = (item.categoria or "otros").strip().lower()[:60] or "otros"
+        categoria, mencion = _categoria_de(item, item.tipo, vocabulario)
         descripcion = " ".join((item.descripcion or "").split()).lower()[:60].strip()
 
         try:
-            completos.append(
-                Movimiento(
-                    fecha=item.fecha or hoy,
-                    tipo=item.tipo,
-                    monto=_decimal_limpio(item.monto),
-                    moneda=item.moneda or Moneda.ARS,
-                    categoria=categoria,
-                    descripcion=descripcion or categoria,
-                    cuenta=(item.cuenta or "").strip()[:40] or None,
-                )
+            movimiento = Movimiento(
+                fecha=item.fecha or hoy,
+                tipo=item.tipo,
+                monto=_decimal_limpio(item.monto),
+                moneda=item.moneda or Moneda.ARS,
+                categoria=categoria,
+                descripcion=descripcion or mencion or categoria,
+                cuenta=(item.cuenta or "").strip()[:40] or None,
             )
         except (ValidationError, InvalidOperation, ValueError) as exc:
             logger.info("Ítem inválido en un mensaje múltiple: %s", exc)
             dudas.append((cita, "no me quedó claro, ¿me lo repetís?"))
+            continue
 
-    return completos, tuple(dudas)
+        if mencion:
+            sin_categoria.append((len(completos), mencion))
+        completos.append(movimiento)
+
+    return completos, tuple(dudas), tuple(sin_categoria)
 
 
 def _a_financiacion(
@@ -915,17 +1032,27 @@ def _a_financiacion(
     return financiacion, ()
 
 
-def _a_compra(extraida: _CompraExtraida | None) -> CompraHipotetica | None:
-    """La compra hipotética validada, o None si no hay monto con el que trabajar."""
+def _a_compra(
+    extraida: _CompraExtraida | None, vocabulario: Vocabulario
+) -> CompraHipotetica | None:
+    """La compra hipotética validada, o None si no hay monto con el que trabajar.
+
+    Acá la categoría se resuelve contra la lista igual que en un registro, pero
+    sin preguntar: si no encaja en ninguna queda en null y el análisis se hace
+    sin comparar contra el rubro. Una compra que todavía no pasó no justifica
+    frenar al usuario con una pregunta.
+    """
     if extraida is None or extraida.monto is None or extraida.monto <= 0:
         return None
+
+    rubro = vocabulario.resolver(extraida.categoria, TipoMovimiento.GASTO)
 
     try:
         return CompraHipotetica(
             monto=_decimal_limpio(extraida.monto),
             moneda=extraida.moneda or Moneda.ARS,
             que=" ".join((extraida.que or "eso").split())[:60] or "eso",
-            categoria=(extraida.categoria or "").strip().lower()[:60] or None,
+            categoria=rubro.nombre if rubro else None,
         )
     except (ValidationError, InvalidOperation, ValueError) as exc:
         logger.info("Compra hipotética inválida: %s", exc)
@@ -942,10 +1069,12 @@ def _a_periodo(extraido: _PeriodoExtraido | None, por_defecto: str) -> Periodo:
     return Periodo(desde=desde, hasta=hasta, etiqueta=etiqueta[:40])
 
 
-def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
+def _a_plan(extraido: _PlanExtraido | None, vocabulario: Vocabulario) -> PlanConsulta:
     """Convierte lo que devolvió el modelo en un plan validado."""
     if extraido is None:
         return PlanConsulta()
+
+    rubro = vocabulario.resolver_en_cualquier_tipo(extraido.categoria, extraido.tipo)
 
     return PlanConsulta(
         agregacion=extraido.agregacion or Agregacion.TOTAL,
@@ -953,7 +1082,13 @@ def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
         agrupar_por=extraido.agrupar_por or Dimension.NINGUNA,
         tipo=extraido.tipo,
         moneda=extraido.moneda,
-        categoria=(extraido.categoria or "").strip().lower()[:60] or None,
+        # Si el rubro no existe en la lista se deja lo que dijo el modelo: un
+        # filtro que no encuentra nada es una respuesta correcta ("no gastaste
+        # nada en eso"), y peor sería contestar por otro rubro parecido.
+        categoria=(
+            rubro.nombre if rubro else (extraido.categoria or "").strip().lower()[:60]
+        )
+        or None,
         comercio=(extraido.comercio or "").strip().lower()[:60] or None,
         dias_semana=tuple(dict.fromkeys(extraido.dias_semana or ())),
         periodo=_a_periodo(extraido.periodo, "en total"),
@@ -966,13 +1101,18 @@ def _a_plan(extraido: _PlanExtraido | None) -> PlanConsulta:
     )
 
 
-def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
+def _a_consulta(extraida: _ConsultaExtraida | None, vocabulario: Vocabulario) -> Consulta:
     """Normaliza los filtros de la consulta. Sin filtros = todo el historial."""
     if extraida is None:
         return Consulta()
 
     etiqueta = (extraida.etiqueta_periodo or "").strip().lower() or "en total"
-    categoria = (extraida.categoria or "").strip().lower() or None
+
+    # "¿cuánto gasté en el súper?" tiene que encontrar los de "supermercado".
+    rubro = vocabulario.resolver_en_cualquier_tipo(extraida.categoria, extraida.tipo)
+    categoria = (
+        rubro.nombre if rubro else (extraida.categoria or "").strip().lower()
+    ) or None
 
     desde, hasta = extraida.desde, extraida.hasta
     if desde and hasta and desde > hasta:
@@ -988,7 +1128,28 @@ def _a_consulta(extraida: _ConsultaExtraida | None) -> Consulta:
     )
 
 
-def _preguntarle_a_gemini(texto: str, hoy: date):
+def _a_gestion(extraida: _CategoriaExtraida | None) -> GestionCategoria | None:
+    """El pedido sobre las categorías, ya validado. None si no es usable."""
+    if extraida is None:
+        return None
+
+    nombre = nombre_valido(extraida.nombre)
+    if extraida.accion is not AccionCategoria.LISTAR and not nombre:
+        # Pidió crear o borrar algo que no tiene nombre de categoría. El bot lo
+        # resuelve mostrando la lista, que es lo que necesita para decidir.
+        logger.info("Gestión de categorías sin nombre usable: %r", extraida.nombre)
+        return GestionCategoria(accion=AccionCategoria.LISTAR)
+
+    try:
+        return GestionCategoria(
+            accion=extraida.accion, nombre=nombre, tipo=extraida.tipo
+        )
+    except ValidationError as exc:
+        logger.info("Gestión de categorías inválida: %s", exc)
+        return None
+
+
+def _preguntarle_a_gemini(texto: str, hoy: date, vocabulario: Vocabulario):
     """Interroga a Gemini reintentando los fallos pasajeros y cayendo al respaldo.
 
     Un 503 por saturación no dice nada del mensaje del usuario, así que no puede
@@ -996,7 +1157,7 @@ def _preguntarle_a_gemini(texto: str, hoy: date):
     ahí se admite que el servicio está caído.
     """
     config = types.GenerateContentConfig(
-        system_instruction=_instruccion_sistema(hoy),
+        system_instruction=_instruccion_sistema(hoy, vocabulario),
         response_mime_type="application/json",
         response_schema=_InterpretacionExtraida,
         temperature=0,
@@ -1044,15 +1205,21 @@ def _preguntarle_a_gemini(texto: str, hoy: date):
     ) from ultimo
 
 
-def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
-    """Decide si el mensaje es un registro o una consulta, y extrae sus datos."""
+def interpretar_mensaje(
+    texto: str, vocabulario: Vocabulario, hoy: date | None = None
+) -> Interpretacion:
+    """Decide si el mensaje es un registro o una consulta, y extrae sus datos.
+
+    `vocabulario` no es opcional: sin la lista del usuario, la IA volvería a
+    inventar categorías, que es exactamente el problema que esto resuelve.
+    """
     texto = (texto or "").strip()
     if not texto:
         raise ParserError("El mensaje está vacío, no hay nada que hacer.")
 
     hoy = hoy or date.today()
 
-    respuesta = _preguntarle_a_gemini(texto, hoy)
+    respuesta = _preguntarle_a_gemini(texto, hoy, vocabulario)
 
     extraida = respuesta.parsed
     if extraida is None:
@@ -1065,16 +1232,20 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             logger.warning("Intención registrar sin movimiento para %r", texto)
             raise ParserError("Dijo registrar pero no extrajo el movimiento.")
         mencion = " ".join((extraida.movimiento.objetivo or "").split()).strip()
+        movimiento, categoria_nueva = _a_movimiento(extraida.movimiento, vocabulario)
         return Interpretacion(
             intencion=Intencion.REGISTRAR,
-            movimiento=_a_movimiento(extraida.movimiento),
+            movimiento=movimiento,
             objetivo=mencion or None
             if extraida.movimiento.tipo is TipoMovimiento.AHORRO
             else None,
+            categoria_nueva=categoria_nueva,
         )
 
     if extraida.intencion is Intencion.REGISTRAR_VARIOS:
-        movimientos, dudas = _a_movimientos(extraida.movimientos, hoy)
+        movimientos, dudas, sin_categoria = _a_movimientos(
+            extraida.movimientos, hoy, vocabulario
+        )
         if not movimientos and not dudas:
             logger.warning("Intención registrar_varios sin ítems para %r", texto)
             raise ParserError("Dijo varios movimientos pero no extrajo ninguno.")
@@ -1082,6 +1253,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             intencion=Intencion.REGISTRAR_VARIOS,
             movimientos=movimientos,
             dudas=dudas,
+            sin_categoria=sin_categoria,
         )
 
     if extraida.intencion is Intencion.REGISTRAR_INVERSION:
@@ -1129,8 +1301,17 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
             faltantes=faltantes,
         )
 
+    if extraida.intencion is Intencion.GESTIONAR_CATEGORIAS:
+        gestion = _a_gestion(extraida.categoria)
+        if gestion is None:
+            logger.info("gestionar_categorias sin datos usables para %r", texto)
+            return Interpretacion(intencion=Intencion.DESCONOCIDA)
+        return Interpretacion(
+            intencion=Intencion.GESTIONAR_CATEGORIAS, gestion=gestion
+        )
+
     if extraida.intencion is Intencion.SIMULAR_COMPRA:
-        compra = _a_compra(extraida.compra)
+        compra = _a_compra(extraida.compra, vocabulario)
         if compra is None:
             logger.info("simular_compra sin monto usable para %r", texto)
             return Interpretacion(intencion=Intencion.DESCONOCIDA)
@@ -1139,7 +1320,7 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
     if extraida.intencion is Intencion.CONSULTA_LIBRE:
         return Interpretacion(
             intencion=Intencion.CONSULTA_LIBRE,
-            plan=_a_plan(extraida.plan),
+            plan=_a_plan(extraida.plan, vocabulario),
         )
 
     if extraida.intencion is Intencion.DESCONOCIDA:
@@ -1147,13 +1328,15 @@ def interpretar_mensaje(texto: str, hoy: date | None = None) -> Interpretacion:
 
     return Interpretacion(
         intencion=extraida.intencion,
-        consulta=_a_consulta(extraida.consulta),
+        consulta=_a_consulta(extraida.consulta, vocabulario),
     )
 
 
-def parsear_movimiento(texto: str, hoy: date | None = None) -> Movimiento:
+def parsear_movimiento(
+    texto: str, vocabulario: Vocabulario, hoy: date | None = None
+) -> Movimiento:
     """Interpreta el texto exigiendo que sea un registro."""
-    resultado = interpretar_mensaje(texto, hoy)
+    resultado = interpretar_mensaje(texto, vocabulario, hoy)
     if resultado.movimiento is None:
         raise ParserError(
             f"El mensaje no es un registro, es {resultado.intencion.value!r}."
