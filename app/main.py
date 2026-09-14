@@ -63,6 +63,11 @@ from app.retos import (
     texto_sin_propuesta,
 )
 from app.db import (
+    SinTablaMensajes,
+    actualizar_movimiento,
+    anotar_mensaje,
+    borrar_movimiento,
+    movimiento_de_mensaje,
     DBError,
     Total,
     alertas_de_chat,
@@ -121,6 +126,7 @@ from app.models import (
     TipoInversion,
     TipoMovimiento,
 )
+from app.ediciones import interpretar_correccion, quiere_borrar
 from app.objetivos import buscar, normalizar, parsear_monto, progreso
 from app.parser import (
     Interpretacion,
@@ -143,7 +149,7 @@ from app.telegram import (
     extraer_mensaje,
     extraer_voz,
 )
-from app.telegram import VozEntrante
+from app.telegram import VozEntrante, extraer_respondido
 from app.transcripcion import (
     TOPE_BYTES as TOPE_AUDIO_BYTES,
     TOPE_SEGUNDOS as TOPE_AUDIO_SEGUNDOS,
@@ -232,6 +238,18 @@ MSG_SIN_ACCESO = (
     "Tu número de chat es {chat_id}"
 )
 
+MSG_REPLY_SIN_MOVIMIENTO = (
+    "Ese mensaje no es un movimiento que pueda editar 🤔\n"
+    "Respondé al mensaje donde te confirmé el gasto (el del ✅) y decime qué "
+    "cambiar: «eran 5 lucas», «fue ayer», «cambialo a transporte» o «borralo»."
+)
+
+MSG_EDICION_VACIA = (
+    "No entendí qué querés cambiar 🤔\n"
+    "Probá: «eran 5 lucas», «no, fue ingreso», «cambialo a transporte», "
+    "«fue ayer» o «borralo»."
+)
+
 ESPERA_SIN_ACCESO = 30 * 60.0
 _ultimo_aviso: dict[int, float] = {}
 
@@ -252,6 +270,11 @@ LIMITE_GEMINI = Limite(20, 3600.0, "gemini")
 # se transcribe y despues se interpreta. El tope es por chat y existe para que
 # una racha de audios no se lleve puesta la cuota diaria de todos.
 LIMITE_AUDIO = Limite(20, 3600.0, "audio")
+
+# Pizarra de un solo uso entre `_resolver` y `procesar_update`. El id del
+# movimiento se conoce al guardarlo; el message_id de la confirmacion, recien
+# despues de mandarla. Esto los junta, y dura lo que dura un update.
+_recien_guardado: dict[int, int] = {}
 
 
 def _frenar(limite: Limite, clave: str) -> None:
@@ -614,6 +637,7 @@ async def procesar_update(update: Any) -> None:
 
     entrante = extraer_mensaje(update)
     voz = extraer_voz(update) if entrante is None else None
+    respondido = extraer_respondido(update)
 
     if entrante is None and voz is None:
         logger.info("Update sin texto ni audio en el chat %s", chat_id)
@@ -669,6 +693,15 @@ async def procesar_update(update: Any) -> None:
         logger.info("El mensaje no contestaba la pregunta abierta; se descarta")
         pendientes.olvidar(chat_id)
 
+    # Un reply a una confirmación del bot es una corrección a ese movimiento.
+    # Va después de las preguntas abiertas (contestar una por reply es normal)
+    # y antes de todo lo demás: «eran 5 lucas» suelto no significa nada, pero
+    # colgado del mensaje correcto significa todo.
+    if respondido is not None and await _atender_reply(
+        chat_id, respondido, texto, usuario
+    ):
+        return
+
     directa = respuesta_directa(texto)
     if directa is not None:
         logger.info("Respuesta fija para %r", texto)
@@ -703,18 +736,7 @@ async def procesar_update(update: Any) -> None:
         await _responder(chat_id, respuesta)
         return
 
-    try:
-        vocabulario = await run_in_threadpool(_vocabulario, usuario.user_id)
-    except Exception:
-        # Un vocabulario vacío no frena al bot: el parser vuelve a aceptar lo
-        # que diga el modelo, como antes de que existieran las categorías. Pasa
-        # si todavía no se corrió migrations/019_categorias.sql, y Render se
-        # despliega solo apenas hay push.
-        logger.exception(
-            "No pude leer las categorías de %s: sigo sin lista. ¿Falta correr "
-            "migrations/019_categorias.sql?", chat_id,
-        )
-        vocabulario = Vocabulario([])
+    vocabulario = await _vocabulario_seguro(chat_id, usuario.user_id)
 
     # "¿qué categorías tengo?" y "creá la categoría X" no tienen nada que
     # interpretar, y el cupo de Gemini es de 20 por hora: se resuelven acá.
@@ -754,6 +776,8 @@ async def procesar_update(update: Any) -> None:
         await _responder(chat_id, MSG_ERROR_INTERNO)
         return
 
+    _recien_guardado.pop(chat_id, None)
+
     try:
         respuesta = await _resolver(
             interpretacion, chat_id, usuario.user_id, vocabulario
@@ -763,7 +787,13 @@ async def procesar_update(update: Any) -> None:
         await _responder(chat_id, MSG_ERROR_INTERNO)
         return
 
-    await _responder(chat_id, respuesta)
+    enviados = await _responder(chat_id, respuesta)
+
+    movimiento_id = _recien_guardado.pop(chat_id, None)
+    if movimiento_id is not None and enviados:
+        await _anotar_referencia(
+            chat_id, enviados[0], movimiento_id, usuario.user_id
+        )
 
 
 MSG_POR_PROBLEMA = {
@@ -932,6 +962,234 @@ async def _resolver_confirmacion_audio(
     return confirmado
 
 
+def _describir_movimiento(fila: dict) -> str:
+    """Cómo quedó un movimiento, leído de la fila que devolvió la base.
+
+    Hermano de `_confirmacion`, pero para un movimiento que ya existe: después
+    de un update lo que hay es un dict de PostgREST, no un `Movimiento`.
+    """
+    tipo = str(fila.get("tipo") or "gasto")
+    etiqueta = _ETIQUETA_TIPO.get(tipo, ("Movimiento",))[0]
+
+    try:
+        monto = Decimal(str(fila.get("monto") or "0"))
+    except (InvalidOperation, ValueError):
+        monto = Decimal("0")
+
+    try:
+        moneda = Moneda(str(fila.get("moneda") or "ARS"))
+    except ValueError:
+        moneda = Moneda.ARS
+
+    fecha = str(fila.get("fecha") or "")
+    try:
+        fecha = f" ({date.fromisoformat(fecha):%d/%m})"
+    except ValueError:
+        fecha = ""
+
+    cuenta = f" · {fila['cuenta']}" if fila.get("cuenta") else ""
+    return (
+        f"{etiqueta} de {_formatear_monto(monto, moneda)} "
+        f"en {fila.get('categoria')}{fecha}{cuenta}"
+    )
+
+
+async def _anotar_referencia(
+    chat_id: int, message_id: int, movimiento_id: int, user_id: str
+) -> None:
+    """Deja anotado de qué movimiento habla el mensaje que acabamos de mandar.
+
+    Que esto falle no puede romper el registro: el movimiento ya está guardado
+    y el usuario ya vio la confirmación. Lo único que se pierde es poder
+    editarlo respondiendo a ese mensaje.
+    """
+    try:
+        await run_in_threadpool(
+            anotar_mensaje, chat_id, message_id, movimiento_id, user_id=user_id
+        )
+    except SinTablaMensajes:
+        logger.warning(
+            "No puedo anotar la referencia del mensaje: ¿falta correr "
+            "migrations/021_mensajes_movimiento.sql?"
+        )
+    except DBError:
+        logger.exception("No pude anotar la referencia del mensaje %s", message_id)
+
+
+async def _atender_reply(
+    chat_id: int, respondido: int, texto: str, usuario: Usuario
+) -> bool:
+    """Trata el mensaje como una corrección al movimiento del mensaje respondido.
+
+    Devuelve False cuando el reply no era para esto y el mensaje tiene que
+    seguir el camino normal: responderle a un mensaje cualquiera del bot no
+    puede dejar al usuario sin respuesta.
+    """
+    try:
+        referencia = await run_in_threadpool(
+            movimiento_de_mensaje, chat_id, respondido
+        )
+    except SinTablaMensajes:
+        logger.warning(
+            "Reply a un movimiento pero sin tabla de referencias: ¿falta correr "
+            "migrations/021_mensajes_movimiento.sql?"
+        )
+        return False
+    except DBError:
+        logger.exception("No pude buscar el movimiento del mensaje %s", respondido)
+        await _responder(chat_id, MSG_ERROR_INTERNO)
+        return True
+
+    if referencia is None:
+        # Puede ser un reply a cualquier mensaje del bot. Si además parecía una
+        # corrección, se avisa; si no, que siga el camino normal y se procese
+        # como un mensaje suelto.
+        if _parece_correccion(texto):
+            await _responder(chat_id, MSG_REPLY_SIN_MOVIMIENTO)
+            return True
+        return False
+
+    if referencia["user_id"] != usuario.user_id:
+        # La referencia es de otro dueño. No debería pasar (un chat es de un
+        # usuario), pero si pasa no se dice de quién es ni qué era.
+        logger.error(
+            "El chat %s respondió a un mensaje de otro usuario (%s)",
+            chat_id, referencia["user_id"],
+        )
+        await _responder(chat_id, MSG_REPLY_SIN_MOVIMIENTO)
+        return True
+
+    movimiento = referencia["movimiento"]
+    movimiento_id = referencia["movimiento_id"]
+
+    if quiere_borrar(texto):
+        pendientes.guardar(
+            chat_id,
+            pendientes.Pendiente(
+                tipo="borrar_movimiento",
+                movimiento_id=movimiento_id,
+                datos={"resumen": _describir_movimiento(movimiento)},
+            ),
+        )
+        await _responder(
+            chat_id,
+            f"¿Seguro que borro {_describir_movimiento(movimiento)}? 🗑️\n"
+            "Decime «sí» y lo borro. Esto no se puede deshacer.",
+        )
+        return True
+
+    vocabulario = await _vocabulario_seguro(chat_id, usuario.user_id)
+
+    try:
+        edicion = await run_in_threadpool(
+            interpretar_correccion, texto, movimiento, vocabulario
+        )
+    except ServicioNoDisponible as exc:
+        logger.error("Gemini no está para corregir el movimiento: %s", exc)
+        await _responder(chat_id, MSG_SERVICIO_CAIDO)
+        return True
+    except ParserError as exc:
+        logger.info("No entendí la corrección %r: %s", texto, exc)
+        await _responder(chat_id, MSG_EDICION_VACIA)
+        return True
+    except Exception:
+        logger.exception("Error inesperado interpretando la corrección %r", texto)
+        await _responder(chat_id, MSG_ERROR_INTERNO)
+        return True
+
+    if not edicion.cambios:
+        await _responder(chat_id, MSG_EDICION_VACIA)
+        return True
+
+    try:
+        actualizado = await run_in_threadpool(
+            actualizar_movimiento,
+            movimiento_id,
+            edicion.cambios,
+            user_id=usuario.user_id,
+        )
+    except DBError as exc:
+        logger.warning("No pude modificar el movimiento %s: %s", movimiento_id, exc)
+        await _responder(chat_id, f"No pude modificarlo 😕\n{exc}")
+        return True
+
+    logger.info(
+        "Movimiento %s corregido: %s", movimiento_id, sorted(edicion.cambios)
+    )
+    await _responder(
+        chat_id,
+        f"✏️ Listo, quedó así:\n{_describir_movimiento(actualizado)}",
+    )
+    return True
+
+
+# Si el reply no apunta a un movimiento, solo se avisa cuando el mensaje
+# parecía una corrección. Responderle «gracias» al bot no tiene por qué recibir
+# un reto sobre cómo se editan los movimientos.
+_PISTAS_CORRECCION = (
+    "era", "eran", "fue", "fueron", "cambia", "cambiá", "corregí", "corregi",
+    "no,", "en realidad", "borr", "elimin", "sacá", "saca", "modific",
+)
+
+
+def _parece_correccion(texto: str) -> bool:
+    """Si el mensaje suena a que el usuario quería arreglar un movimiento."""
+    limpio = " ".join((texto or "").split()).strip().lower()
+    if not limpio:
+        return False
+    return any(limpio.startswith(p) or f" {p}" in limpio for p in _PISTAS_CORRECCION)
+
+
+async def _resolver_pendiente_borrado_movimiento(
+    chat_id: int, pendiente, texto: str, user_id: str
+) -> str | None:
+    """Contesta la confirmación de un borrado. None si no contestaba eso."""
+    decision = _leer_confirmacion(texto)
+
+    if decision is None:
+        return None
+
+    pendientes.olvidar(chat_id)
+
+    if decision is False:
+        return "Listo, no borro nada 👍"
+
+    try:
+        borrado = await run_in_threadpool(
+            borrar_movimiento, pendiente.movimiento_id, user_id=user_id
+        )
+    except DBError as exc:
+        logger.warning(
+            "No pude borrar el movimiento %s: %s", pendiente.movimiento_id, exc
+        )
+        return f"No pude borrarlo 😕\n{exc}"
+
+    if not borrado:
+        return "Ese movimiento ya no estaba 🤔"
+
+    logger.info("Movimiento %s borrado por el chat %s", pendiente.movimiento_id, chat_id)
+    resumen = (pendiente.datos or {}).get("resumen") or "el movimiento"
+    return f"🗑️ Borré {resumen}"
+
+
+async def _vocabulario_seguro(chat_id: int, user_id: str) -> Vocabulario:
+    """Las categorías del usuario, o una lista vacía si no se pudieron leer.
+
+    Un vocabulario vacío no frena al bot: el parser vuelve a aceptar lo que
+    diga el modelo, como antes de que existieran las categorías. Pasa si
+    todavía no se corrió migrations/019_categorias.sql, y Render se despliega
+    solo apenas hay push.
+    """
+    try:
+        return await run_in_threadpool(_vocabulario, user_id)
+    except Exception:
+        logger.exception(
+            "No pude leer las categorías de %s: sigo sin lista. ¿Falta correr "
+            "migrations/019_categorias.sql?", chat_id,
+        )
+        return Vocabulario([])
+
+
 async def _autorizar(chat_id: int) -> Usuario | None:
     """El usuario dueño del chat, o None si el mensaje no se procesa."""
     usuario = await run_in_threadpool(resolver_usuario, chat_id)
@@ -1003,6 +1261,7 @@ async def _resolver(
             guardar_movimiento, movimiento, user_id=user_id
         )
         logger.info("Movimiento %s guardado: %s", movimiento_id, movimiento)
+        _recien_guardado[chat_id] = movimiento_id
 
         pregunta = ""
         if interpretacion.categoria_nueva:
@@ -2148,6 +2407,11 @@ async def _resolver_pendiente(
     if pendiente.tipo == "categoria":
         return await _resolver_pendiente_categoria(chat_id, pendiente, texto, user_id)
 
+    if pendiente.tipo == "borrar_movimiento":
+        return await _resolver_pendiente_borrado_movimiento(
+            chat_id, pendiente, texto, user_id
+        )
+
     if pendiente.tipo == "borrar_categoria":
         return await _resolver_pendiente_borrado(chat_id, pendiente, texto, user_id)
 
@@ -2374,9 +2638,20 @@ def _confirmacion(movimiento: Movimiento) -> str:
     )
 
 
-async def _responder(chat_id: int, texto: str) -> None:
-    """Envía un mensaje absorbiendo los fallos: no hay a quién avisarle si falla."""
+async def _responder(chat_id: int, texto: str) -> list[int]:
+    """Envía un mensaje absorbiendo los fallos: no hay a quién avisarle si falla.
+
+    Devuelve los message_id que quedaron en el chat. Hacen falta para anotar de
+    qué movimiento habla una confirmación: el id del movimiento se conoce al
+    guardarlo, pero el del mensaje recién existe después de mandarlo. Lista
+    vacía si no se pudo enviar.
+    """
     try:
-        await enviar_mensaje(chat_id, texto)
+        enviados = await enviar_mensaje(chat_id, texto)
     except TelegramError:
         logger.exception("No pude responderle al chat %s", chat_id)
+        return []
+
+    return [
+        m["message_id"] for m in enviados if isinstance(m.get("message_id"), int)
+    ]

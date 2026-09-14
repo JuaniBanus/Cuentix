@@ -26,6 +26,7 @@ TABLA_RENDIMIENTOS = "rendimientos_billeteras"
 TABLA_VINCULOS = "usuarios_telegram"
 TABLA_PERFILES = "perfiles"
 TABLA_CATEGORIAS = "categorias"
+TABLA_MENSAJES = "mensajes_movimiento"
 
 PAGINA = 1000
 
@@ -424,6 +425,196 @@ def recategorizar_movimiento(movimiento_id: int, categoria: str, *, user_id: str
     except Exception as exc:
         logger.exception("Error de red recategorizando el movimiento")
         raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+class SinTablaMensajes(DBError):
+    """Falta correr migrations/021_mensajes_movimiento.sql.
+
+    Se distingue del resto de los errores porque no es una falla: es una
+    migración que todavía no corrió, y el bot tiene que poder seguir andando
+    sin editar por reply hasta que corra.
+    """
+
+
+def _es_tabla_faltante(exc: APIError) -> bool:
+    """Si el error de PostgREST es «esa tabla no existe»."""
+    codigo = getattr(exc, "code", "") or ""
+    detalle = (getattr(exc, "message", None) or str(exc)).lower()
+    return codigo in {"PGRST205", "42P01"} or "does not exist" in detalle
+
+
+def anotar_mensaje(
+    chat_id: int, message_id: int, movimiento_id: int, *, user_id: str
+) -> None:
+    """Deja anotado que ese mensaje del bot habla de ese movimiento.
+
+    Upsert y no insert porque Telegram puede reusar un message_id si el mensaje
+    anterior se borró, y porque reintentar un update no puede fallar por una
+    fila que ya estaba.
+    """
+    fila = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "movimiento_id": movimiento_id,
+        "user_id": _exigir(user_id),
+    }
+    try:
+        _obtener_cliente().table(TABLA_MENSAJES).upsert(
+            fila, on_conflict="chat_id,message_id"
+        ).execute()
+    except APIError as exc:
+        if _es_tabla_faltante(exc):
+            raise SinTablaMensajes(
+                "Falta correr migrations/021_mensajes_movimiento.sql."
+            ) from exc
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la referencia del mensaje: %s", detalle)
+        raise DBError(f"No pude anotar la referencia: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red anotando la referencia del mensaje")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
+def movimiento_de_mensaje(chat_id: int, message_id: int) -> dict | None:
+    """El movimiento del que habla un mensaje del bot, o None si no hay.
+
+    Trae el movimiento entero, no solo el id: quien corrige necesita ver cómo
+    está hoy para poder decir cómo queda, y así se evita una segunda consulta.
+    """
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA_MENSAJES)
+            .select(f"movimiento_id, user_id, {TABLA}(*)")
+            .eq("chat_id", chat_id)
+            .eq("message_id", message_id)
+            .limit(1)
+            .execute()
+        )
+    except APIError as exc:
+        if _es_tabla_faltante(exc):
+            raise SinTablaMensajes(
+                "Falta correr migrations/021_mensajes_movimiento.sql."
+            ) from exc
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la búsqueda de la referencia: %s", detalle)
+        raise DBError(f"No pude buscar el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red buscando la referencia del mensaje")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    filas = respuesta.data or []
+    if not filas:
+        return None
+
+    fila = filas[0]
+    movimiento = fila.get(TABLA)
+    if not movimiento:
+        # La referencia quedó pero el movimiento no está. No debería pasar (hay
+        # cascade), salvo que alguien borre a mano desde el panel de Supabase.
+        logger.info(
+            "Referencia huérfana: mensaje %s del chat %s", message_id, chat_id
+        )
+        return None
+
+    return {
+        "movimiento_id": int(fila["movimiento_id"]),
+        "user_id": fila["user_id"],
+        "movimiento": movimiento,
+    }
+
+
+def obtener_movimiento(movimiento_id: int, *, user_id: str) -> dict | None:
+    """Un movimiento por id, siempre acotado a su dueño."""
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA)
+            .select("*")
+            .eq("id", movimiento_id)
+            .eq("user_id", _exigir(user_id))
+            .limit(1)
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó la lectura del movimiento: %s", detalle)
+        raise DBError(f"No pude leer el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red leyendo el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    filas = respuesta.data or []
+    return filas[0] if filas else None
+
+
+# Lo único que se puede tocar de un movimiento ya guardado. El resto (user_id,
+# id, objetivo_id) no se corrige por chat: cambiarlos no es «me equivoqué al
+# dictarlo», es otra operación.
+CAMPOS_EDITABLES = frozenset({
+    "fecha", "tipo", "monto", "moneda", "categoria", "descripcion",
+    "comercio", "cuenta",
+})
+
+
+def actualizar_movimiento(
+    movimiento_id: int, cambios: dict[str, Any], *, user_id: str
+) -> dict:
+    """Aplica los cambios y devuelve el movimiento como quedó.
+
+    La lista blanca se aplica acá y no solo en quien llama: es el último lugar
+    antes de la base, y lo que se está editando lo propuso un modelo de
+    lenguaje a partir de texto libre.
+    """
+    limpios = {k: v for k, v in (cambios or {}).items() if k in CAMPOS_EDITABLES}
+    if not limpios:
+        raise DBError("No hay nada para cambiar.")
+
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA)
+            .update(limpios)
+            .eq("id", movimiento_id)
+            .eq("user_id", _exigir(user_id))
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el update del movimiento: %s", detalle)
+        raise DBError(f"No pude modificar el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red modificando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    filas = respuesta.data or []
+    if not filas:
+        # El .eq(user_id) no matcheó: o no es suyo, o ya no existe. Las dos
+        # cosas se le cuentan igual, para no confirmar que el id existe.
+        raise DBError("Ese movimiento ya no está.")
+    return filas[0]
+
+
+def borrar_movimiento(movimiento_id: int, *, user_id: str) -> bool:
+    """Borra un movimiento del usuario. False si no había nada que borrar."""
+    try:
+        respuesta = (
+            _obtener_cliente()
+            .table(TABLA)
+            .delete()
+            .eq("id", movimiento_id)
+            .eq("user_id", _exigir(user_id))
+            .execute()
+        )
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el borrado del movimiento: %s", detalle)
+        raise DBError(f"No pude borrar el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red borrando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    return bool(respuesta.data)
 
 
 def recategorizar_todos(

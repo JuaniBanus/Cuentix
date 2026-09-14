@@ -215,6 +215,32 @@ def extraer_mensaje(update: Any) -> MensajeEntrante | None:
     return MensajeEntrante(chat_id=chat_id, texto=texto.strip(), message_id=message_id)
 
 
+def extraer_respondido(update: Any) -> int | None:
+    """El message_id del mensaje DEL BOT al que este update le responde.
+
+    None si el update no es un reply, o si le responde a una persona: corregir
+    un movimiento es contestarle al bot, y un reply entre usuarios de un grupo
+    no tiene nada que ver con esto.
+    """
+    if not isinstance(update, dict):
+        return None
+
+    mensaje = update.get("message") or update.get("edited_message")
+    if not isinstance(mensaje, dict):
+        return None
+
+    respondido = mensaje.get("reply_to_message")
+    if not isinstance(respondido, dict):
+        return None
+
+    autor = respondido.get("from")
+    if not isinstance(autor, dict) or not autor.get("is_bot"):
+        return None
+
+    message_id = respondido.get("message_id")
+    return message_id if isinstance(message_id, int) else None
+
+
 def extraer_voz(update: Any) -> VozEntrante | None:
     """El audio de un update, o None si el mensaje no trae ninguno.
 

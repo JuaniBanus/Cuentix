@@ -97,6 +97,23 @@ insert/update/delete están escritas y son correctas, pero el `grant` de
 escritura no se otorgó: habilitar el ABM en la web es agregarlo, no reescribir
 las reglas.
 
+**Editar un movimiento tiene lista blanca, y borrarlo pide confirmación.**
+`CAMPOS_EDITABLES` (`app/db.py`) es lo único que un reply puede tocar: fecha,
+tipo, monto, moneda, categoría, descripción, comercio y cuenta. `user_id`, `id`
+y `objetivo_id` no están, y el filtro se aplica en `actualizar_movimiento()`,
+o sea en el último lugar antes de la base, porque lo que se está escribiendo lo
+propuso un modelo a partir de texto libre. La categoría vuelve a pasar por
+`Vocabulario.resolver()`: corregir no es una puerta de atrás para meter una
+etiqueta que no está en la lista. El borrado, que es lo irreversible, se
+reconoce con una lista fija de frases (sin Gemini) y siempre abre una pregunta
+antes de ejecutarse.
+
+**Toda escritura por reply se acota al dueño con `.eq("user_id", ...)`.** La
+referencia de `mensajes_movimiento` guarda el `user_id` además del movimiento, y
+`_atender_reply()` compara contra quién escribe antes de tocar nada: un
+`message_id` es un número chico y adivinable, así que la referencia sola nunca
+alcanza como autorización.
+
 **Un audio no es una vía paralela: es texto que entra por la misma puerta.**
 `app/transcripcion.py` solo convierte la voz en la cadena que el usuario habría
 escrito; de ahí en adelante sigue el camino de siempre (respuestas fijas,
