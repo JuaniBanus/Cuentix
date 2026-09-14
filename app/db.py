@@ -12,7 +12,14 @@ from postgrest import APIError
 from supabase import Client, create_client
 
 from app.config import SUPABASE_KEY, SUPABASE_URL
-from app.models import Alerta, Inversion, Moneda, Movimiento, TipoMovimiento
+from app.models import (
+    Alerta,
+    Inversion,
+    MedioPago,
+    Moneda,
+    Movimiento,
+    TipoMovimiento,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +146,7 @@ def _aplicar_filtros(
     tipo: TipoMovimiento | None = None,
     moneda: Moneda | None = None,
     categoria: str | None = None,
+    medio_pago: MedioPago | None = None,
 ) -> Any:
     """Encadena sobre la query solo los filtros que vengan definidos."""
     consulta = consulta.eq("user_id", _exigir(user_id))
@@ -153,6 +161,8 @@ def _aplicar_filtros(
         consulta = consulta.eq("moneda", moneda.value)
     if categoria is not None:
         consulta = consulta.eq("categoria", categoria.strip().lower())
+    if medio_pago is not None:
+        consulta = consulta.eq("medio_pago", medio_pago.value)
     return consulta
 
 
@@ -236,6 +246,74 @@ def init_db() -> None:
             raise DBError(f"No pude conectarme a Supabase ({SUPABASE_URL}).") from exc
 
 
+# La columna medio_pago llega con migrations/022_medio_pago.sql. Entre que
+# Render despliega este código (se despliega solo apenas hay push) y que
+# alguien corre el SQL hay una ventana en la que la columna NO existe, y en esa
+# ventana el bot tiene que seguir registrando igual: quedarse sin poder anotar
+# un gasto es mucho peor que anotarlo sin el medio de pago.
+#
+# Se detecta al primer rechazo y se recuerda, para no pagar un reintento por
+# movimiento. Es el mismo criterio que con las categorías (019) y la tabla de
+# mensajes (021): la migración pendiente degrada la función, no rompe el bot.
+_hay_medio_pago = True
+
+_COLUMNAS_ANALISIS = "fecha,tipo,monto,moneda,categoria,descripcion,cuenta"
+
+
+def _sin_columna_medio_pago(exc: APIError) -> bool:
+    """Si PostgREST rechazó porque la columna todavía no existe."""
+    codigo = str(getattr(exc, "code", "") or "")
+    detalle = (getattr(exc, "message", None) or str(exc)).lower()
+    return "medio_pago" in detalle and codigo in {"42703", "PGRST204"}
+
+
+def _olvidar_medio_pago() -> None:
+    """Deja de mandar la columna en lo que queda de vida del proceso."""
+    global _hay_medio_pago
+    if _hay_medio_pago:
+        logger.warning(
+            "La columna medio_pago no existe todavía: sigo sin ella. "
+            "¿Falta correr migrations/022_medio_pago.sql?"
+        )
+    _hay_medio_pago = False
+
+
+def _columnas_analisis() -> str:
+    """Las columnas que se piden para analizar, según exista o no medio_pago."""
+    if _hay_medio_pago:
+        return f"{_COLUMNAS_ANALISIS},medio_pago"
+    return _COLUMNAS_ANALISIS
+
+
+def _insertar(filas: list[dict]) -> list[dict]:
+    """Inserta en movimientos, reintentando sin medio_pago si no existe."""
+    if not _hay_medio_pago:
+        filas = [{k: v for k, v in f.items() if k != "medio_pago"} for f in filas]
+
+    try:
+        return _obtener_cliente().table(TABLA).insert(filas).execute().data or []
+    except APIError as exc:
+        if not _sin_columna_medio_pago(exc):
+            detalle = getattr(exc, "message", None) or str(exc)
+            logger.error("Supabase rechazó el insert: %s", detalle)
+            raise DBError(f"No pude guardar el movimiento: {detalle}") from exc
+        _olvidar_medio_pago()
+    except Exception as exc:
+        logger.exception("Error de red guardando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+    limpias = [{k: v for k, v in f.items() if k != "medio_pago"} for f in filas]
+    try:
+        return _obtener_cliente().table(TABLA).insert(limpias).execute().data or []
+    except APIError as exc:
+        detalle = getattr(exc, "message", None) or str(exc)
+        logger.error("Supabase rechazó el insert: %s", detalle)
+        raise DBError(f"No pude guardar el movimiento: {detalle}") from exc
+    except Exception as exc:
+        logger.exception("Error de red guardando el movimiento")
+        raise DBError("No pude comunicarme con la base de datos.") from exc
+
+
 def guardar_movimiento(
     movimiento: Movimiento, objetivo_id: str | None = None, *, user_id: str
 ) -> int:
@@ -258,22 +336,14 @@ def guardar_movimiento(
             else None
         ),
         "cuenta": movimiento.cuenta,
+        "medio_pago": movimiento.medio_pago.value if movimiento.medio_pago else None,
         "objetivo_id": objetivo_id,
     }
 
-    try:
-        respuesta = _obtener_cliente().table(TABLA).insert(fila).execute()
-    except APIError as exc:
-        detalle = getattr(exc, "message", None) or str(exc)
-        logger.error("Supabase rechazó el insert: %s", detalle)
-        raise DBError(f"No pude guardar el movimiento: {detalle}") from exc
-    except Exception as exc:
-        logger.exception("Error de red guardando el movimiento")
-        raise DBError("No pude comunicarme con la base de datos.") from exc
-
-    if not respuesta.data:
+    creadas = _insertar([fila])
+    if not creadas:
         raise DBError("El insert no devolvió la fila creada.")
-    return int(respuesta.data[0]["id"])
+    return int(creadas[0]["id"])
 
 
 def obtener_categorias(*, user_id: str) -> list[dict]:
@@ -553,7 +623,7 @@ def obtener_movimiento(movimiento_id: int, *, user_id: str) -> dict | None:
 # dictarlo», es otra operación.
 CAMPOS_EDITABLES = frozenset({
     "fecha", "tipo", "monto", "moneda", "categoria", "descripcion",
-    "comercio", "cuenta",
+    "comercio", "cuenta", "medio_pago",
 })
 
 
@@ -567,6 +637,8 @@ def actualizar_movimiento(
     lenguaje a partir de texto libre.
     """
     limpios = {k: v for k, v in (cambios or {}).items() if k in CAMPOS_EDITABLES}
+    if not _hay_medio_pago:
+        limpios.pop("medio_pago", None)
     if not limpios:
         raise DBError("No hay nada para cambiar.")
 
@@ -753,23 +825,15 @@ def guardar_movimientos(movimientos: list[Movimiento], *, user_id: str) -> list[
             "categoria": m.categoria,
             "descripcion": m.descripcion,
             "cuenta": m.cuenta,
+            "medio_pago": m.medio_pago.value if m.medio_pago else None,
         }
         for m in movimientos
     ]
 
-    try:
-        respuesta = _obtener_cliente().table(TABLA).insert(filas).execute()
-    except APIError as exc:
-        detalle = getattr(exc, "message", None) or str(exc)
-        logger.error("Supabase rechazó el insert múltiple: %s", detalle)
-        raise DBError(f"No pude guardar los movimientos: {detalle}") from exc
-    except Exception as exc:
-        logger.exception("Error de red guardando los movimientos")
-        raise DBError("No pude comunicarme con la base de datos.") from exc
-
-    if not respuesta.data or len(respuesta.data) != len(movimientos):
+    creadas = _insertar(filas)
+    if len(creadas) != len(movimientos):
         raise DBError("El insert no devolvió todas las filas creadas.")
-    return [int(fila["id"]) for fila in respuesta.data]
+    return [int(fila["id"]) for fila in creadas]
 
 
 def guardar_inversion(inversion: Inversion, *, user_id: str) -> str:
@@ -1359,6 +1423,7 @@ def movimientos_para_analisis(
     moneda: Moneda | None = None,
     categoria: str | None = None,
     comercio: str | None = None,
+    medio_pago: MedioPago | None = None,
     limite: int = 5000,
 ) -> list[dict]:
     """Trae las filas crudas que cumplen los filtros, para agregar en Python."""
@@ -1369,13 +1434,14 @@ def movimientos_para_analisis(
     while len(filas) < limite:
         tamano = min(PAGINA, limite - len(filas))
         consulta = _aplicar_filtros(
-            cliente.table(TABLA).select("fecha,tipo,monto,moneda,categoria,descripcion,cuenta"),
+            cliente.table(TABLA).select(_columnas_analisis()),
             user_id=user_id,
             desde=desde,
             hasta=hasta,
             tipo=tipo,
             moneda=moneda,
             categoria=categoria,
+            medio_pago=medio_pago,
         )
         if comercio:
             consulta = consulta.ilike("descripcion", f"%{_escapar_like(comercio.strip().lower())}%")
@@ -1385,6 +1451,12 @@ def movimientos_para_analisis(
         try:
             lote = consulta.execute().data or []
         except APIError as exc:
+            if _sin_columna_medio_pago(exc):
+                # Falta correr 022. Se reintenta la vuelta entera sin la
+                # columna en vez de devolver un error: una consulta que no se
+                # puede contestar es peor que una sin el desglose por medio.
+                _olvidar_medio_pago()
+                continue
             detalle = getattr(exc, "message", None) or str(exc)
             logger.error("Supabase rechazó la consulta analítica: %s", detalle)
             raise DBError(f"Error consultando la base: {detalle}") from exc
@@ -1520,6 +1592,7 @@ def obtener_movimientos(
             categoria=registro["categoria"],
             descripcion=registro["descripcion"],
             cuenta=registro.get("cuenta"),
+            medio_pago=registro.get("medio_pago"),
         )
         resultados.append(registro)
     return resultados

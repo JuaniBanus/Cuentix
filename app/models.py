@@ -51,6 +51,7 @@ class Intencion(str, Enum):
     TOTAL_POR_TIPO = "total_por_tipo"
     TOTAL_POR_CATEGORIA = "total_por_categoria"
     BALANCE = "balance"
+    RESUMEN_MES = "resumen_mes"
     DESCONOCIDA = "desconocida"
 
 
@@ -60,6 +61,25 @@ class AccionCategoria(str, Enum):
     CREAR = "crear"
     LISTAR = "listar"
     BORRAR = "borrar"
+
+
+class MedioPago(str, Enum):
+    """Cómo se movió la plata.
+
+    Ojo que no es lo mismo que `cuenta`, que es DÓNDE está la plata. "Pagué con
+    débito del Galicia" tiene las dos cosas: medio=debito, cuenta=banco. Y una
+    tarjeta de crédito no es una cuenta, es una deuda: por eso vive acá y no
+    allá.
+
+    Es una lista cerrada porque los medios de pago existen en el mundo y no los
+    inventa el usuario. Las categorías son al revés, y por eso tienen tabla.
+    """
+
+    EFECTIVO = "efectivo"
+    DEBITO = "debito"
+    CREDITO = "credito"
+    TRANSFERENCIA = "transferencia"
+    BILLETERA = "billetera"
 
 
 class GestionCategoria(BaseModel):
@@ -94,6 +114,10 @@ class Movimiento(BaseModel):
         default=None, gt=0, max_digits=14, decimal_places=2
     )
     cuenta: str | None = Field(default=None, min_length=1, max_length=40)
+    # None es la respuesta correcta cuando el usuario no dijo cómo pagó: no se
+    # deduce ni se pregunta, y se puede completar después respondiéndole al
+    # mensaje de confirmación.
+    medio_pago: MedioPago | None = None
 
 
 class Inversion(BaseModel):
@@ -160,6 +184,7 @@ class Dimension(str, Enum):
     TIPO = "tipo"
     MONEDA = "moneda"
     CUENTA = "cuenta"
+    MEDIO_PAGO = "medio_pago"
 
 
 class DiaSemana(str, Enum):
@@ -195,6 +220,7 @@ class PlanConsulta(BaseModel):
     moneda: Moneda | None = None
     categoria: str | None = Field(default=None, max_length=60)
     comercio: str | None = Field(default=None, max_length=60)
+    medio_pago: MedioPago | None = None
     dias_semana: tuple[DiaSemana, ...] = ()
 
     periodo: Periodo = Field(default_factory=Periodo)

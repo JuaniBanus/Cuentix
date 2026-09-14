@@ -68,6 +68,7 @@ from app.db import (
     anotar_mensaje,
     borrar_movimiento,
     movimiento_de_mensaje,
+    movimientos_para_analisis,
     DBError,
     Total,
     alertas_de_chat,
@@ -987,10 +988,10 @@ def _describir_movimiento(fila: dict) -> str:
     except ValueError:
         fecha = ""
 
-    cuenta = f" · {fila['cuenta']}" if fila.get("cuenta") else ""
+    detalle = _detalle_pago(fila.get("cuenta"), fila.get("medio_pago"))
     return (
         f"{etiqueta} de {_formatear_monto(monto, moneda)} "
-        f"en {fila.get('categoria')}{fecha}{cuenta}"
+        f"en {fila.get('categoria')}{fecha}{detalle}"
     )
 
 
@@ -1321,6 +1322,8 @@ async def _resolver(
         return await run_in_threadpool(_texto_por_categoria, consulta, user_id)
     if intencion is Intencion.BALANCE:
         return await run_in_threadpool(_texto_balance, consulta, user_id)
+    if intencion is Intencion.RESUMEN_MES:
+        return await run_in_threadpool(_texto_resumen_mes, consulta, user_id)
 
     return MSG_NO_ENTENDI
 
@@ -2576,6 +2579,169 @@ def _texto_por_categoria(consulta: Consulta, user_id: str) -> str:
     return "\n".join(lineas)
 
 
+# Cuántas categorías se listan en el resumen antes de agrupar el resto en una
+# línea. Más que esto no entra de un vistazo en el teléfono.
+TOPE_RESUMEN_CATEGORIAS = 5
+
+_MESES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+_ETIQUETA_MEDIO_PAGO = {
+    "efectivo": "efectivo",
+    "debito": "débito",
+    "credito": "crédito",
+    "transferencia": "transferencia",
+    "billetera": "billetera virtual",
+}
+
+
+def _mes_del_periodo(consulta: Consulta) -> tuple[date, date, bool]:
+    """(primer día, último día, es_el_mes_en_curso) del mes que se pidió.
+
+    El parser manda desde/hasta; si vino sin fechas, el mes es el de hoy. Se
+    normaliza al mes entero para que "van X de N días" no mienta cuando el
+    modelo devolvió un rango raro.
+    """
+    hoy = date.today()
+    referencia = consulta.desde or consulta.hasta or hoy
+
+    # "resumen de noviembre" pedido en septiembre es el noviembre que ya pasó,
+    # no el que falta: un mes futuro no tiene movimientos y la respuesta sería
+    # siempre "no tengo nada". El año aparece en el título, así que no queda
+    # ambiguo de cuál se está hablando.
+    if (referencia.year, referencia.month) > (hoy.year, hoy.month):
+        referencia = referencia.replace(year=referencia.year - 1)
+
+    primero = referencia.replace(day=1)
+    if primero.month == 12:
+        siguiente = primero.replace(year=primero.year + 1, month=1)
+    else:
+        siguiente = primero.replace(month=primero.month + 1)
+    ultimo = siguiente - timedelta(days=1)
+
+    en_curso = (primero.year, primero.month) == (hoy.year, hoy.month)
+    return primero, ultimo, en_curso
+
+
+def _texto_resumen_mes(consulta: Consulta, user_id: str) -> str:
+    """La foto del mes: qué entró, qué salió, qué queda y en qué se fue."""
+    primero, ultimo, en_curso = _mes_del_periodo(consulta)
+    # En el mes en curso no tiene sentido mirar más allá de hoy.
+    hasta = min(ultimo, date.today()) if en_curso else ultimo
+
+    cifras = balance(
+        user_id=user_id, desde=primero, hasta=hasta, moneda=consulta.moneda
+    )
+    desglose = totales_por_categoria(
+        user_id=user_id, desde=primero, hasta=hasta,
+        tipo=TipoMovimiento.GASTO, moneda=consulta.moneda,
+    )
+    filas = movimientos_para_analisis(
+        user_id=user_id, desde=primero, hasta=hasta,
+        tipo=TipoMovimiento.GASTO, moneda=consulta.moneda,
+    )
+
+    titulo = f"📊 Resumen de {_MESES[primero.month - 1]}"
+    if primero.year != date.today().year:
+        titulo += f" {primero.year}"
+    if en_curso:
+        titulo += f" (van {hasta.day} de {ultimo.day} días)"
+
+    if not cifras:
+        return f"{titulo}\n\nNo tengo ningún movimiento de ese mes 🤷"
+
+    lineas = [titulo]
+
+    for moneda, numeros in cifras.items():
+        lineas.append("")
+        if len(cifras) > 1:
+            lineas.append(f"— {moneda.value} —")
+
+        queda = numeros["balance"]
+        semaforo = "💚" if queda >= 0 else "🔻"
+        lineas.extend([
+            f"  Ingresos: {_formatear_monto(numeros['ingresos'], moneda)}",
+            f"  Gastos:   {_formatear_monto(numeros['gastos'], moneda)}",
+            f"  {semaforo} Queda: {_formatear_monto(queda, moneda)}",
+        ])
+
+        gastos_moneda = [
+            (cat, total) for cat, m, total in desglose if m is moneda
+        ]
+        bloque = _bloque_categorias(gastos_moneda, numeros["gastos"], moneda)
+        if bloque:
+            lineas.extend(["", *bloque])
+
+        medios = _bloque_medios(
+            [f for f in filas if f.get("moneda") == moneda.value], moneda
+        )
+        if medios:
+            lineas.extend(["", *medios])
+
+    lineas.append("")
+    lineas.append("(ahorros e inversiones no cuentan acá: son plata apartada)")
+    return "\n".join(lineas)
+
+
+def _bloque_categorias(
+    gastos: list[tuple[str, Any]], total_gastado: Decimal, moneda: Moneda
+) -> list[str]:
+    """Las categorías donde más se gastó, con su peso sobre el total."""
+    if not gastos or total_gastado <= 0:
+        return []
+
+    lineas = ["  Dónde se fue:"]
+    for categoria, total in gastos[:TOPE_RESUMEN_CATEGORIAS]:
+        porcentaje = int(round(total.monto / total_gastado * 100))
+        lineas.append(
+            f"  · {categoria}: {_formatear_monto(total.monto, moneda)}"
+            f" ({porcentaje}%)"
+        )
+
+    restantes = gastos[TOPE_RESUMEN_CATEGORIAS:]
+    if restantes:
+        suma = sum((t.monto for _, t in restantes), Decimal("0"))
+        porcentaje = int(round(suma / total_gastado * 100))
+        lineas.append(
+            f"  · otras {len(restantes)}: {_formatear_monto(suma, moneda)}"
+            f" ({porcentaje}%)"
+        )
+    return lineas
+
+
+def _bloque_medios(filas: list[dict], moneda: Moneda) -> list[str]:
+    """Cómo se pagaron los gastos del mes.
+
+    Se omite entero cuando ningún movimiento tiene el dato: mostrar "sin
+    registrar 100%" no le dice nada a nadie. Si hay aunque sea uno cargado, el
+    resto aparece como "sin registrar", que ahí sí informa.
+    """
+    if not any(fila.get("medio_pago") for fila in filas):
+        return []
+
+    totales: dict[str, Decimal] = {}
+    for fila in filas:
+        clave = _ETIQUETA_MEDIO_PAGO.get(
+            fila.get("medio_pago") or "", "sin registrar"
+        )
+        try:
+            monto = Decimal(str(fila.get("monto") or "0"))
+        except (InvalidOperation, ValueError):
+            continue
+        totales[clave] = totales.get(clave, Decimal("0")) + monto
+
+    if not totales:
+        return []
+
+    ordenados = sorted(totales.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ["  Cómo pagaste:"] + [
+        f"  · {etiqueta}: {_formatear_monto(monto, moneda)}"
+        for etiqueta, monto in ordenados
+    ]
+
+
 def _texto_balance(consulta: Consulta, user_id: str) -> str:
     """Ingresos, gastos y la diferencia, por moneda."""
     resultado = balance(
@@ -2631,11 +2797,27 @@ def _formatear_monto(monto: Decimal, moneda: Moneda) -> str:
 def _confirmacion(movimiento: Movimiento) -> str:
     """Ej: '✅ Gasto de $8.500 en supermercado registrado (03/08)'."""
     etiqueta = _ETIQUETA_TIPO[movimiento.tipo.value][0]
-    cuenta = f" · {movimiento.cuenta}" if movimiento.cuenta else ""
+    detalle = _detalle_pago(
+        movimiento.cuenta,
+        movimiento.medio_pago.value if movimiento.medio_pago else None,
+    )
     return (
         f"✅ {etiqueta} de {_formatear_monto(movimiento.monto, movimiento.moneda)} "
-        f"en {movimiento.categoria} registrado ({movimiento.fecha:%d/%m}){cuenta}"
+        f"en {movimiento.categoria} registrado ({movimiento.fecha:%d/%m}){detalle}"
     )
+
+
+def _detalle_pago(cuenta: str | None, medio_pago: str | None) -> str:
+    """El ' · débito · banco' del final, con lo que haya. Vacío si no hay nada.
+
+    Los dos datos son opcionales y suelen venir vacíos: solo se muestran cuando
+    el usuario los dijo, para que la confirmación no crezca al pedo.
+    """
+    partes = [
+        _ETIQUETA_MEDIO_PAGO.get(medio_pago or "", "") if medio_pago else "",
+        (cuenta or "").strip(),
+    ]
+    return "".join(f" · {parte}" for parte in partes if parte)
 
 
 async def _responder(chat_id: int, texto: str) -> list[int]:

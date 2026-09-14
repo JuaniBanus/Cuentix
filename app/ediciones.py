@@ -27,7 +27,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.categorias import Vocabulario
-from app.models import Moneda, TipoMovimiento
+from app.models import MedioPago, Moneda, TipoMovimiento
 from app.parser import ParserError, pedirle_a_gemini
 
 logger = logging.getLogger(__name__)
@@ -87,6 +87,7 @@ class _EdicionExtraida(BaseModel):
     descripcion: str | None = None
     comercio: str | None = None
     cuenta: str | None = None
+    medio_pago: MedioPago | None = None
 
 
 def _instruccion(movimiento: dict, vocabulario: Vocabulario, hoy: date) -> str:
@@ -108,6 +109,7 @@ EL MOVIMIENTO, COMO ESTA GUARDADO AHORA
 - descripcion: {movimiento.get('descripcion')}
 - comercio: {movimiento.get('comercio')}
 - cuenta: {movimiento.get('cuenta')}
+- medio de pago: {movimiento.get('medio_pago')}
 
 TU TRABAJO
 Devolvés SOLO los campos que el usuario quiere cambiar. Todo lo que no
@@ -129,6 +131,14 @@ TIPO
 - "no, fue ingreso" cambia el tipo. Ojo que al cambiar de tipo la categoría
   puede dejar de existir: si el usuario no dijo otra, dejá categoria en null y
   el código se encarga.
+
+MEDIO DE PAGO
+- Valores posibles: efectivo, debito, credito, transferencia, billetera.
+- "fue con débito" -> debito. "lo pagué con Mercado Pago" -> billetera.
+  "fue en efectivo" -> efectivo. "me lo transfirieron" -> transferencia.
+  "lo puse en la tarjeta" / "fue en cuotas" -> credito.
+- Es muy común que la corrección sea justo esto, porque al registrar se deja
+  vacío cuando el usuario no lo dice.
 
 CATEGORIAS DISPONIBLES
 {listado}
@@ -195,6 +205,12 @@ def _a_edicion(
 
     if extraida.moneda is not None and extraida.moneda.value != movimiento.get("moneda"):
         cambios["moneda"] = extraida.moneda.value
+
+    if (
+        extraida.medio_pago is not None
+        and extraida.medio_pago.value != movimiento.get("medio_pago")
+    ):
+        cambios["medio_pago"] = extraida.medio_pago.value
 
     if extraida.fecha is not None:
         fecha = min(extraida.fecha, hoy)

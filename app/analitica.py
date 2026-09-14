@@ -34,6 +34,15 @@ _ETIQUETA_TIPO = {
     "ahorro": "ahorros", "inversion": "inversiones",
 }
 
+# Lo que se guarda va sin tildes y en una palabra; lo que se muestra, no.
+_ETIQUETA_MEDIO = {
+    "efectivo": "efectivo",
+    "debito": "débito",
+    "credito": "crédito",
+    "transferencia": "transferencia",
+    "billetera": "billetera virtual",
+}
+
 
 class Grupo:
     """Un renglón del resultado: su etiqueta y los números de ese conjunto."""
@@ -105,6 +114,10 @@ def _clave(fila: dict, dimension: Dimension, cuando: date) -> str:
         return fila.get("moneda", "")
     if dimension is Dimension.CUENTA:
         return (fila.get("cuenta") or "sin cuenta").strip()
+    if dimension is Dimension.MEDIO_PAGO:
+        return _ETIQUETA_MEDIO.get(
+            fila.get("medio_pago") or "", "sin registrar"
+        )
     return "total"
 
 
@@ -122,6 +135,7 @@ def ejecutar(
         moneda=plan.moneda,
         categoria=plan.categoria,
         comercio=plan.comercio,
+        medio_pago=plan.medio_pago,
     )
 
     dias_pedidos = {d.value for d in plan.dias_semana}

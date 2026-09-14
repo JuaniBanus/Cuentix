@@ -97,6 +97,14 @@ insert/update/delete están escritas y son correctas, pero el `grant` de
 escritura no se otorgó: habilitar el ABM en la web es agregarlo, no reescribir
 las reglas.
 
+**El medio de pago es un enum, no texto libre.** `MedioPago`
+(`app/models.py`) tiene cinco valores y la base los repite en un `CHECK`. Son
+dos cerrojos sobre el mismo dato: aunque el modelo devuelva cualquier cosa,
+pydantic la rechaza antes de la consulta y Postgres antes del insert. Es lo
+contrario de la categoría, que sí es abierta y por eso necesita la tabla y
+`Vocabulario.resolver()`. Si alguna vez `medio_pago` pasa a ser `str`, hay que
+volver a pensar de dónde sale la garantía.
+
 **Editar un movimiento tiene lista blanca, y borrarlo pide confirmación.**
 `CAMPOS_EDITABLES` (`app/db.py`) es lo único que un reply puede tocar: fecha,
 tipo, monto, moneda, categoría, descripción, comercio y cuenta. `user_id`, `id`

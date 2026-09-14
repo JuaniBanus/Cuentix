@@ -28,6 +28,7 @@ from app.models import (
     GestionCategoria,
     Intencion,
     Inversion,
+    MedioPago,
     Moneda,
     Movimiento,
     Periodo,
@@ -75,6 +76,8 @@ class _MovimientoExtraido(BaseModel):
     categoria_nueva: str | None = None
     descripcion: str
     cuenta: str | None = None
+    # Cómo se pagó. null si el mensaje no lo dice: no se deduce nunca.
+    medio_pago: MedioPago | None = None
     comercio: str | None = None
     cantidad: float | None = None
     unidad: str | None = None
@@ -141,6 +144,7 @@ class _PlanExtraido(BaseModel):
     moneda: Moneda | None = None
     categoria: str | None = None
     comercio: str | None = None
+    medio_pago: MedioPago | None = None
     dias_semana: list[DiaSemana] | None = None
     periodo: _PeriodoExtraido | None = None
     comparar_con: _PeriodoExtraido | None = None
@@ -339,6 +343,35 @@ CUENTA (dónde está la plata)
   binance / lemon / buenbit -> cripto; cocos / iol / balanz -> broker;
   el cajón / abajo del colchón / la lata -> efectivo.
 - Si no encaja en ninguna, usá una o dos palabras en minúsculas y sin tildes.
+
+MEDIO_PAGO (cómo se movió la plata)
+- Los únicos valores posibles son: efectivo, debito, credito, transferencia,
+  billetera. Nada más.
+- Completalo SOLO si el mensaje dice cómo pagó o cómo le pagaron:
+  "pagué 20 lucas con débito"        -> debito
+  "me transfirieron 300 mil"         -> transferencia
+  "gasté 5 lucas en efectivo"        -> efectivo
+  "lo puse en la tarjeta"            -> credito
+  "pagué con Mercado Pago"           -> billetera
+  "lo saqué en 6 cuotas"             -> credito
+  "me lo depositaron"                -> transferencia
+  "pagué con el QR"                  -> billetera
+  "lo pagué con la tarjeta de débito"-> debito
+- Marcas y apodos: mercado pago / modo / ualá / cuenta dni / prex / naranja x
+  -> billetera; visa / master / amex / "la tarjeta" a secas / "en cuotas"
+  -> credito; CBU / CVU / alias / "me lo mandaron" / "se lo mandé" ->
+  transferencia; cash / en mano / billete -> efectivo.
+- Si el mensaje NO dice cómo pagó, dejalo en null. Nunca lo deduzcas de la
+  categoría, del monto ni de lo habitual: "gasté 8 lucas en el super" ->
+  medio_pago=null. Está perfecto que quede vacío, el usuario lo completa
+  después si quiere.
+- NO es lo mismo que cuenta. cuenta es DÓNDE está la plata; medio_pago es CÓMO
+  se movió. Pueden venir los dos juntos:
+  "pagué 30 lucas con débito del Galicia" -> medio_pago=debito, cuenta=banco
+  "saqué 10 mil del cajón y los gasté"    -> medio_pago=efectivo, cuenta=efectivo
+  "lo puse en Mercado Pago"  (guardar)    -> cuenta="billetera virtual",
+                                             medio_pago=null
+  "pagué con Mercado Pago"   (gastar)     -> medio_pago=billetera, cuenta=null
 
 OBJETIVO (para qué se aparta la plata)
 - SOLO para tipo=ahorro, y solo si el mensaje nombra una meta concreta:
@@ -599,9 +632,10 @@ CÓMO SE ARMA EL PLAN
   "cuánto gasto por día" -> dia      "por mes" -> mes
 - agrupar_por: cómo abrir el resultado.
   ninguna (un número solo) · categoria · comercio · dia_semana · mes · tipo ·
-  moneda · cuenta
+  moneda · cuenta · medio_pago
   "¿en qué gasto?" -> categoria      "¿qué día gasto más?" -> dia_semana
   "¿cómo vengo mes a mes?" -> mes    "¿dónde compro más?" -> comercio
+  "¿cómo pago las cosas?" -> medio_pago
 - tipo / moneda: filtran. null = sin filtrar.
 - categoria: el nombre exacto de la lista, si la pregunta nombra un rubro.
   Traducí lo que dijo el usuario a la etiqueta de la lista: "en el súper" ->
@@ -609,6 +643,12 @@ CÓMO SE ARMA EL PLAN
 - comercio: texto a buscar DENTRO de la descripción del movimiento, cuando
   pregunta por un lugar o comercio ("¿cuánto gasté en Starbucks?" -> "starbucks").
   No lo uses para rubros generales: "supermercado" es categoria, no comercio.
+- medio_pago: cómo se pagó, solo si la pregunta lo menciona. Valores:
+  efectivo · debito · credito · transferencia · billetera.
+  "¿cuánto gasté en efectivo?" -> medio_pago=efectivo
+  "¿cuánto pagué con tarjeta?" -> medio_pago=credito
+  "¿cuánto va por Mercado Pago?" -> medio_pago=billetera
+  Si pregunta CÓMO paga en general, no filtres: usá agrupar_por=medio_pago.
 - dias_semana: lista, solo si la pregunta los menciona ("los fines de semana"
   -> ["sabado", "domingo"]).
 - periodo: desde/hasta y una etiqueta para nombrarlo en la respuesta.
@@ -633,6 +673,10 @@ EJEMPLOS
   agregacion=total, tipo=gasto, periodo=este mes, comparar_con=el mes pasado
 "¿cuántas veces salí a comer en julio?"
   agregacion=cantidad, tipo=gasto, categoria="comida", periodo=julio
+"¿cuánto gasté en efectivo este mes?"
+  agregacion=total, tipo=gasto, medio_pago=efectivo, periodo=este mes
+"¿cuánto pagué con tarjeta?"
+  agregacion=total, tipo=gasto, medio_pago=credito
 
 =========================== SI ES UNA CONSULTA ==========================
 Elegí la intención que corresponda, completá "consulta" y dejá
@@ -645,8 +689,17 @@ Elegí la intención que corresponda, completá "consulta" y dejá
 - total_por_categoria: el desglose por rubro.
   "¿en qué se me va la plata?" -> tipo=gasto, período del mes en curso
   "¿cuánto gasté en supermercado?" -> tipo=gasto, categoria="supermercado"
-- balance: cuánto entró menos cuánto salió.
-  "¿cómo vengo este mes?", "¿me alcanzó?", "balance de julio"
+- balance: cuánto entró menos cuánto salió, a secas.
+  "¿me alcanzó?", "balance de la semana", "cuánto entró menos cuánto salió"
+- resumen_mes: la foto completa de UN MES. Ingresos, gastos, cuánto queda, en
+  qué se fue y cómo lo pagó. Es lo que hay que usar cuando el mensaje pide un
+  resumen o pregunta cómo viene, sin pedir un número puntual.
+  "resumen del mes", "¿cómo vengo este mes?", "resumen de noviembre",
+  "¿cómo vengo?", "hacé un resumen", "¿cómo venimos en septiembre?"
+  El mes va en desde/hasta: primer y último día de ESE mes. Si no aclara cuál,
+  es el mes en curso, y hasta = hoy.
+  Ante la duda entre balance y resumen_mes cuando habla de un mes, elegí
+  resumen_mes: contesta lo mismo y además el desglose.
 
 FILTROS DE LA CONSULTA
 - desde / hasta: rango de fechas en formato YYYY-MM-DD, ambos inclusive.
@@ -784,6 +837,7 @@ def _a_movimiento(
             categoria=categoria,
             descripcion=descripcion or mencion or categoria,
             cuenta=_normalizar_cuenta(extraido.cuenta),
+            medio_pago=extraido.medio_pago,
             **_datos_de_precio(extraido, monto),
         )
     except ValidationError as exc:
@@ -1098,6 +1152,7 @@ def _a_plan(extraido: _PlanExtraido | None, vocabulario: Vocabulario) -> PlanCon
         )
         or None,
         comercio=(extraido.comercio or "").strip().lower()[:60] or None,
+        medio_pago=extraido.medio_pago,
         dias_semana=tuple(dict.fromkeys(extraido.dias_semana or ())),
         periodo=_a_periodo(extraido.periodo, "en total"),
         comparar_con=(
