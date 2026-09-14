@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -255,7 +256,20 @@ def init_db() -> None:
 # Se detecta al primer rechazo y se recuerda, para no pagar un reintento por
 # movimiento. Es el mismo criterio que con las categorías (019) y la tabla de
 # mensajes (021): la migración pendiente degrada la función, no rompe el bot.
-_hay_medio_pago = True
+# Cuánto se espera antes de volver a probar. La migración se corre a mano y
+# minutos después de que el código ya está arriba, así que rendirse para
+# siempre significaría ignorar la columna hasta el próximo reinicio: el bot
+# seguiría sin guardar el medio de pago aunque el SQL ya haya corrido.
+_REINTENTO_MEDIO_PAGO = 300.0
+
+_sin_medio_pago_desde: float | None = None
+
+
+def _mandar_medio_pago() -> bool:
+    """Si esta operación tiene que incluir la columna medio_pago."""
+    if _sin_medio_pago_desde is None:
+        return True
+    return time.monotonic() - _sin_medio_pago_desde > _REINTENTO_MEDIO_PAGO
 
 _COLUMNAS_ANALISIS = "fecha,tipo,monto,moneda,categoria,descripcion,cuenta"
 
@@ -269,25 +283,26 @@ def _sin_columna_medio_pago(exc: APIError) -> bool:
 
 def _olvidar_medio_pago() -> None:
     """Deja de mandar la columna en lo que queda de vida del proceso."""
-    global _hay_medio_pago
-    if _hay_medio_pago:
+    global _sin_medio_pago_desde
+    if _sin_medio_pago_desde is None:
         logger.warning(
-            "La columna medio_pago no existe todavía: sigo sin ella. "
-            "¿Falta correr migrations/022_medio_pago.sql?"
+            "La columna medio_pago no existe todavía: sigo sin ella y vuelvo a "
+            "probar en %s minutos. ¿Falta correr migrations/022_medio_pago.sql?",
+            int(_REINTENTO_MEDIO_PAGO // 60),
         )
-    _hay_medio_pago = False
+    _sin_medio_pago_desde = time.monotonic()
 
 
 def _columnas_analisis() -> str:
     """Las columnas que se piden para analizar, según exista o no medio_pago."""
-    if _hay_medio_pago:
+    if _mandar_medio_pago():
         return f"{_COLUMNAS_ANALISIS},medio_pago"
     return _COLUMNAS_ANALISIS
 
 
 def _insertar(filas: list[dict]) -> list[dict]:
     """Inserta en movimientos, reintentando sin medio_pago si no existe."""
-    if not _hay_medio_pago:
+    if not _mandar_medio_pago():
         filas = [{k: v for k, v in f.items() if k != "medio_pago"} for f in filas]
 
     try:
@@ -637,7 +652,7 @@ def actualizar_movimiento(
     lenguaje a partir de texto libre.
     """
     limpios = {k: v for k, v in (cambios or {}).items() if k in CAMPOS_EDITABLES}
-    if not _hay_medio_pago:
+    if not _mandar_medio_pago():
         limpios.pop("medio_pago", None)
     if not limpios:
         raise DBError("No hay nada para cambiar.")
