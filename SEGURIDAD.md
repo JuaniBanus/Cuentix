@@ -97,6 +97,16 @@ insert/update/delete están escritas y son correctas, pero el `grant` de
 escritura no se otorgó: habilitar el ABM en la web es agregarlo, no reescribir
 las reglas.
 
+**Un audio no es una vía paralela: es texto que entra por la misma puerta.**
+`app/transcripcion.py` solo convierte la voz en la cadena que el usuario habría
+escrito; de ahí en adelante sigue el camino de siempre (respuestas fijas,
+comandos, vocabulario de categorías, `Vocabulario.resolver()`). Si alguna vez lo
+que devuelve el modelo de audio se escribiera en la base sin pasar por el
+parser, se rompió la garantía de la lista cerrada. Y lo que se baja de Telegram
+tiene tope —`TOPE_SEGUNDOS` y `TOPE_BYTES`, chequeados antes de descargar y otra
+vez contra los bytes que llegan—: sin eso, un archivo grande es un pico de
+memoria y una factura de Gemini.
+
 **`esc()` cubre los cinco caracteres** (`& < > " '`), porque se usa tanto en
 texto como dentro de atributos. Quitar cualquiera abre XSS por atributo.
 

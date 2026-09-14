@@ -1157,28 +1157,24 @@ def _a_gestion(extraida: _CategoriaExtraida | None) -> GestionCategoria | None:
         return None
 
 
-def _preguntarle_a_gemini(texto: str, hoy: date, vocabulario: Vocabulario):
-    """Interroga a Gemini reintentando los fallos pasajeros y cayendo al respaldo.
+def pedirle_a_gemini(contents, config):
+    """Llama a Gemini reintentando los fallos pasajeros y cayendo al respaldo.
 
     Un 503 por saturación no dice nada del mensaje del usuario, así que no puede
     terminar en un «no entendí»: se reintenta, se prueba el otro modelo y recién
     ahí se admite que el servicio está caído.
-    """
-    config = types.GenerateContentConfig(
-        system_instruction=_instruccion_sistema(hoy, vocabulario),
-        response_mime_type="application/json",
-        response_schema=_InterpretacionExtraida,
-        temperature=0,
-        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
-    )
 
+    Vive acá y no en cada módulo que hable con Gemini porque la política —qué
+    códigos se reintentan, cuántas veces, cuándo se da por caído— tiene que ser
+    la misma para interpretar un texto que para transcribir un audio.
+    """
     ultimo: Exception | None = None
 
     for modelo in (MODELO, MODELO_RESPALDO):
         for intento in range(1, REINTENTOS + 1):
             try:
                 respuesta = _cliente.models.generate_content(
-                    model=modelo, contents=texto, config=config
+                    model=modelo, contents=contents, config=config
                 )
             except genai_errors.APIError as exc:
                 ultimo = exc
@@ -1211,6 +1207,18 @@ def _preguntarle_a_gemini(texto: str, hoy: date, vocabulario: Vocabulario):
     raise ServicioNoDisponible(
         "No pude contactar al servicio de interpretación."
     ) from ultimo
+
+
+def _preguntarle_a_gemini(texto: str, hoy: date, vocabulario: Vocabulario):
+    """Interroga a Gemini con el prompt de interpretación."""
+    config = types.GenerateContentConfig(
+        system_instruction=_instruccion_sistema(hoy, vocabulario),
+        response_mime_type="application/json",
+        response_schema=_InterpretacionExtraida,
+        temperature=0,
+        thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+    )
+    return pedirle_a_gemini(texto, config)
 
 
 def interpretar_mensaje(

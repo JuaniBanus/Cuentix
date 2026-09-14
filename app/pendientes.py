@@ -23,9 +23,11 @@ class Pendiente:
     """
 
     tipo: str
-    movimiento_id: int
-    mencion: str
-    moneda: str
+    # Los tres tienen default porque no toda pregunta cuelga de un movimiento:
+    # la que confirma lo que se escucho en un audio todavia no anoto nada.
+    movimiento_id: int = 0
+    mencion: str = ""
+    moneda: str = "ARS"
     candidatos: list[dict] = field(default_factory=list)
     cola: list[dict] = field(default_factory=list)
     datos: dict = field(default_factory=dict)

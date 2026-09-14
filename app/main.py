@@ -134,12 +134,24 @@ from app.recordatorio import atender_comando as atender_comando_recordatorio
 from app.recordatorio import enviar_recordatorios
 from app.recordatorio import es_comando as es_comando_recordatorio
 from app.telegram import (
+    ArchivoDemasiadoGrande,
     TelegramError,
     cerrar_cliente,
+    descargar_archivo,
     enviar_mensaje,
     extraer_chat_id,
     extraer_mensaje,
+    extraer_voz,
 )
+from app.telegram import VozEntrante
+from app.transcripcion import (
+    TOPE_BYTES as TOPE_AUDIO_BYTES,
+    TOPE_SEGUNDOS as TOPE_AUDIO_SEGUNDOS,
+    AudioMuyLargo,
+    Problema,
+    Transcripcion,
+)
+from app.transcripcion import transcribir as transcribir_audio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -148,8 +160,57 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MSG_SOLO_TEXTO = (
-    "Por ahora solo entiendo mensajes de texto 🙃\n"
-    "Escribime algo como: «gasté 8 lucas en el super ayer»."
+    "Por ahora entiendo texto y audios 🙃\n"
+    "Escribime o mandame un audio: «gasté 8 lucas en el super ayer»."
+)
+
+# El eco de un audio que se entendio bien. No frena nada: el bot lo manda y
+# sigue anotando. Esta para que el usuario vea que se entendio incluso cuando
+# el modelo se declara seguro, que es justo el caso en que un error pasaria
+# desapercibido hasta leer la confirmacion del movimiento.
+MSG_ESCUCHE = "🎤 Escuché: «{texto}»"
+
+MSG_AUDIO_LARGO = (
+    f"Ese audio es muy largo para mí 😅 (aguanto hasta "
+    f"{TOPE_AUDIO_SEGUNDOS // 60} minutos).\n"
+    "Mandame uno más cortito con el gasto, o escribímelo."
+)
+
+MSG_AUDIO_PESADO = (
+    "Ese audio pesa demasiado y no lo pude bajar 😅\n"
+    "Probá con uno más corto, o escribímelo."
+)
+
+MSG_AUDIO_VACIO = (
+    "No llegué a escuchar nada en ese audio 🤔\n"
+    "¿Lo grabás de nuevo? A veces se corta el micrófono."
+)
+
+MSG_AUDIO_INAUDIBLE = (
+    "Se escucha, pero no llego a entender qué decís 😕\n"
+    "Si estás en la calle suele ser el ruido de fondo.\n"
+    "Probá de nuevo en un lugar más tranquilo, o escribímelo."
+)
+
+MSG_AUDIO_NO_ES_PLATA = (
+    "Te escuché bien, pero no encontré ningún gasto ni pregunta ahí 🙃\n"
+    "¿Me lo mandaste por error?"
+)
+
+MSG_AUDIO_FALLO = (
+    "No pude bajar tu audio de Telegram 😬\n"
+    "Probá de nuevo en un ratito, o escribímelo."
+)
+
+MSG_AUDIO_CANCELADO = (
+    "Listo, no anoto nada 👍\n"
+    "Escribímelo y lo registro."
+)
+
+MSG_MUCHOS_AUDIOS = (
+    "Estás mandando muchos audios seguidos 😅\n"
+    "Escuchar cada uno me consume cuota, así que dejame respirar un rato.\n"
+    "Mientras tanto, escribímelo y lo anoto al toque."
 )
 MSG_NO_ENTENDI = (
     "No entendí 🤔\n"
@@ -186,6 +247,11 @@ TOPE_PROPIAS = 60
 
 LIMITE_MERCADO = Limite(30, 60.0, "mercado")
 LIMITE_GEMINI = Limite(20, 3600.0, "gemini")
+
+# Cada audio gasta una llamada a Gemini de mas que un mensaje escrito: primero
+# se transcribe y despues se interpreta. El tope es por chat y existe para que
+# una racha de audios no se lleve puesta la cuota diaria de todos.
+LIMITE_AUDIO = Limite(20, 3600.0, "audio")
 
 
 def _frenar(limite: Limite, clave: str) -> None:
@@ -547,13 +613,14 @@ async def procesar_update(update: Any) -> None:
         return
 
     entrante = extraer_mensaje(update)
+    voz = extraer_voz(update) if entrante is None else None
 
-    if entrante is None:
-        logger.info("Update sin texto en el chat %s", chat_id)
+    if entrante is None and voz is None:
+        logger.info("Update sin texto ni audio en el chat %s", chat_id)
         await _responder(chat_id, MSG_SOLO_TEXTO)
         return
 
-    chat_del_mensaje, texto, _ = entrante
+    chat_del_mensaje = entrante.chat_id if entrante is not None else voz.chat_id
     if chat_del_mensaje != chat_id:
         logger.error(
             "Update inconsistente: autoricé el chat %s y el mensaje dice %s",
@@ -561,9 +628,29 @@ async def procesar_update(update: Any) -> None:
         )
         return
 
+    if entrante is not None:
+        texto = entrante.texto
+    else:
+        # Recién acá se baja el archivo y se gasta cuota: primero el chat tenía
+        # que estar autorizado y ser el mismo que dice el update.
+        texto = await _escuchar_audio(chat_id, voz)
+        if texto is None:
+            return
+
     logger.info("Mensaje de %s (%s): %r", chat_id, usuario.email, texto)
 
     pendiente = pendientes.mirar(chat_id)
+
+    # La confirmación de un audio va antes que el resto: lo que se contesta acá
+    # no es la pregunta de un movimiento a medio anotar, es si el bot escuchó
+    # bien. Si el usuario confirma, seguimos con ese texto como si lo hubiera
+    # escrito él.
+    if pendiente is not None and pendiente.tipo == "confirmar_audio":
+        texto = await _resolver_confirmacion_audio(chat_id, pendiente, texto)
+        if texto is None:
+            return
+        pendiente = None
+
     if pendiente is not None:
         try:
             respuesta = await _resolver_pendiente(
@@ -677,6 +764,172 @@ async def procesar_update(update: Any) -> None:
         return
 
     await _responder(chat_id, respuesta)
+
+
+MSG_POR_PROBLEMA = {
+    Problema.VACIO: MSG_AUDIO_VACIO,
+    Problema.INAUDIBLE: MSG_AUDIO_INAUDIBLE,
+    Problema.NO_ES_PLATA: MSG_AUDIO_NO_ES_PLATA,
+}
+
+_CONFIRMAN = frozenset({
+    "si", "sí", "sisi", "si si", "sip", "dale", "ok", "oka", "okey", "okay",
+    "correcto", "exacto", "eso", "eso es", "tal cual", "asi es", "así es",
+    "obvio", "perfecto", "confirmo", "anotalo", "anotá", "anota", "listo",
+    "👍", "👌", "✅",
+})
+
+_RECHAZAN = frozenset({
+    "no", "nop", "nope", "negativo", "cancelar", "cancela", "cancelalo",
+    "dejalo", "dejá", "deja", "olvidalo", "nada", "mal", "no era", "no es",
+    "borralo", "❌",
+})
+
+
+def _leer_confirmacion(texto: str) -> bool | None:
+    """True si confirmó, False si rechazó, None si contestó otra cosa.
+
+    Esa tercera opción no es un caso raro: lo natural cuando el bot entendió
+    mal es reescribir el mensaje, no decir «no». Quien llama trata ese texto
+    como el mensaje bueno.
+    """
+    limpio = " ".join((texto or "").split()).strip().lower()
+    limpio = limpio.strip(".,;:!¡?¿ ")
+
+    if limpio in _CONFIRMAN:
+        return True
+    if limpio in _RECHAZAN:
+        return False
+    return None
+
+
+def _texto_confirmacion(transcripcion: Transcripcion) -> str:
+    """Le repite al usuario lo que se entendió, antes de anotar nada."""
+    if transcripcion.dudas:
+        flojo = transcripcion.dudas[0]
+        if len(transcripcion.dudas) > 1:
+            flojo = " ni ".join(transcripcion.dudas[:2])
+        aclaracion = f"No me quedó claro {flojo}."
+    else:
+        aclaracion = "No estoy del todo seguro de haber escuchado bien."
+
+    return (
+        f"Entendí: «{transcripcion.texto}»\n"
+        f"{aclaracion}\n\n"
+        "¿Lo anoto así? Decime «sí», o escribime cómo era."
+    )
+
+
+async def _escuchar_audio(chat_id: int, voz: VozEntrante) -> str | None:
+    """Convierte un audio en el texto que el usuario habría escrito.
+
+    Devuelve None cuando ya se le contestó al usuario: puede ser un error, o
+    puede ser que el audio quedó dudoso y se abrió una pregunta para
+    confirmarlo. Anotar un movimiento con un monto adivinado es peor que
+    volver a preguntar, así que ante la duda no se devuelve texto.
+    """
+    if voz.duracion > TOPE_AUDIO_SEGUNDOS:
+        logger.info("Audio de %s descartado: dura %ss", chat_id, voz.duracion)
+        await _responder(chat_id, MSG_AUDIO_LARGO)
+        return None
+
+    if voz.tamano > TOPE_AUDIO_BYTES:
+        logger.info("Audio de %s descartado: pesa %s bytes", chat_id, voz.tamano)
+        await _responder(chat_id, MSG_AUDIO_PESADO)
+        return None
+
+    try:
+        LIMITE_AUDIO.revisar(str(chat_id))
+    except LimiteExcedido:
+        logger.warning("Cupo de audios agotado por el chat %s", chat_id)
+        await _responder(chat_id, MSG_MUCHOS_AUDIOS)
+        return None
+
+    try:
+        audio = await descargar_archivo(voz.file_id, TOPE_AUDIO_BYTES)
+    except ArchivoDemasiadoGrande:
+        logger.info("Audio de %s más grande de lo que bajo", chat_id)
+        await _responder(chat_id, MSG_AUDIO_PESADO)
+        return None
+    except TelegramError:
+        logger.exception("No pude bajar el audio de %s", chat_id)
+        await _responder(chat_id, MSG_AUDIO_FALLO)
+        return None
+
+    try:
+        transcripcion = await run_in_threadpool(
+            transcribir_audio, audio, voz.mime, voz.duracion
+        )
+    except AudioMuyLargo:
+        await _responder(chat_id, MSG_AUDIO_LARGO)
+        return None
+    except ServicioNoDisponible as exc:
+        logger.error("Gemini no está para transcribir el audio de %s: %s", chat_id, exc)
+        await _responder(chat_id, MSG_SERVICIO_CAIDO)
+        return None
+    except ParserError as exc:
+        logger.info("No pude transcribir el audio de %s: %s", chat_id, exc)
+        await _responder(chat_id, MSG_AUDIO_INAUDIBLE)
+        return None
+    except Exception:
+        logger.exception("Error inesperado transcribiendo el audio de %s", chat_id)
+        await _responder(chat_id, MSG_ERROR_INTERNO)
+        return None
+
+    if transcripcion.problema is not None:
+        logger.info(
+            "Audio de %s sin nada que anotar: %s", chat_id, transcripcion.problema.value
+        )
+        await _responder(chat_id, MSG_POR_PROBLEMA[transcripcion.problema])
+        return None
+
+    logger.info(
+        "Audio de %s (%ss, confianza %s): %r",
+        chat_id, voz.duracion, transcripcion.confianza.value, transcripcion.texto,
+    )
+
+    if not transcripcion.hay_que_confirmar:
+        await _responder(chat_id, MSG_ESCUCHE.format(texto=transcripcion.texto))
+        return transcripcion.texto
+
+    pendientes.guardar(
+        chat_id,
+        pendientes.Pendiente(
+            tipo="confirmar_audio", datos={"texto": transcripcion.texto}
+        ),
+    )
+    await _responder(chat_id, _texto_confirmacion(transcripcion))
+    return None
+
+
+async def _resolver_confirmacion_audio(
+    chat_id: int, pendiente, texto: str
+) -> str | None:
+    """Qué texto procesar después de que el usuario contestó la confirmación.
+
+    None significa que no hay nada más que hacer: ya se le respondió.
+    """
+    pendientes.olvidar(chat_id)
+    decision = _leer_confirmacion(texto)
+
+    if decision is False:
+        logger.info("El chat %s descartó lo que entendí del audio", chat_id)
+        await _responder(chat_id, MSG_AUDIO_CANCELADO)
+        return None
+
+    if decision is None:
+        # Reescribió el mensaje en vez de contestar sí o no: eso es lo que vale.
+        logger.info("El chat %s corrigió a mano lo que entendí del audio", chat_id)
+        return texto
+
+    confirmado = (pendiente.datos or {}).get("texto") or ""
+    if not confirmado.strip():
+        logger.warning("Confirmación de audio sin texto guardado en %s", chat_id)
+        await _responder(chat_id, MSG_AUDIO_VACIO)
+        return None
+
+    logger.info("El chat %s confirmó el audio: %r", chat_id, confirmado)
+    return confirmado
 
 
 async def _autorizar(chat_id: int) -> Usuario | None:

@@ -22,12 +22,32 @@ class TelegramError(RuntimeError):
     """Falló una llamada a la Bot API."""
 
 
+class ArchivoDemasiadoGrande(TelegramError):
+    """El archivo pasa el tope que aceptamos bajar."""
+
+
 class MensajeEntrante(NamedTuple):
     """Lo mínimo que necesitamos de un update para procesarlo."""
 
     chat_id: int
     texto: str
     message_id: int
+
+
+class VozEntrante(NamedTuple):
+    """Un audio que todavía no bajamos: lo que Telegram cuenta de él.
+
+    `duracion` y `tamano` vienen en el update, antes de descargar nada. Eso
+    permite rechazar un audio de media hora sin gastar la descarga ni la cuota
+    de Gemini.
+    """
+
+    chat_id: int
+    message_id: int
+    file_id: str
+    duracion: int
+    mime: str
+    tamano: int
 
 
 def _ocultar_token(texto: str) -> str:
@@ -125,6 +145,51 @@ async def enviar_mensaje(
     return enviados
 
 
+async def descargar_archivo(file_id: str, tope_bytes: int) -> bytes:
+    """Baja un archivo del chat. Dos pasos: getFile y después el contenido.
+
+    `tope_bytes` se chequea contra lo que declara getFile y otra vez contra lo
+    que llega de verdad: el primero evita la descarga, el segundo cubre que el
+    tamaño declarado mienta o no venga.
+    """
+    datos = await _llamar("getFile", {"file_id": file_id})
+
+    ruta = datos.get("file_path")
+    if not isinstance(ruta, str) or not ruta:
+        raise TelegramError("Telegram no me dijo dónde está el archivo.")
+
+    declarado = datos.get("file_size")
+    if isinstance(declarado, int) and declarado > tope_bytes:
+        raise ArchivoDemasiadoGrande(
+            f"El archivo pesa {declarado} bytes y el tope es {tope_bytes}."
+        )
+
+    cliente = _obtener_cliente()
+    try:
+        # URL absoluta: el contenido no cuelga de /bot<token> sino de
+        # /file/bot<token>, así que no sirve el base_url del cliente.
+        respuesta = await cliente.get(
+            f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{ruta}",
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        respuesta.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.exception("Error bajando el archivo %s", file_id)
+        raise TelegramError(
+            f"No pude bajar el archivo: {_ocultar_token(str(exc))}"
+        ) from exc
+
+    contenido = respuesta.content
+    if len(contenido) > tope_bytes:
+        raise ArchivoDemasiadoGrande(
+            f"El archivo pesa {len(contenido)} bytes y el tope es {tope_bytes}."
+        )
+    if not contenido:
+        raise TelegramError("El archivo vino vacío.")
+
+    return contenido
+
+
 def extraer_mensaje(update: Any) -> MensajeEntrante | None:
     """Saca chat_id, texto y message_id del JSON crudo de un update."""
     if not isinstance(update, dict):
@@ -148,6 +213,54 @@ def extraer_mensaje(update: Any) -> MensajeEntrante | None:
         return None
 
     return MensajeEntrante(chat_id=chat_id, texto=texto.strip(), message_id=message_id)
+
+
+def extraer_voz(update: Any) -> VozEntrante | None:
+    """El audio de un update, o None si el mensaje no trae ninguno.
+
+    Toma tanto `voice` (la nota de voz del micrófono, que es el caso normal)
+    como `audio` (un archivo mandado como adjunto), porque para el usuario las
+    dos cosas son «le mandé un audio». `video_note` queda afuera a propósito:
+    es un video y pesa otra cosa.
+    """
+    if not isinstance(update, dict):
+        return None
+
+    mensaje = update.get("message") or update.get("edited_message")
+    if not isinstance(mensaje, dict):
+        return None
+
+    audio = mensaje.get("voice") or mensaje.get("audio")
+    if not isinstance(audio, dict):
+        return None
+
+    file_id = audio.get("file_id")
+    if not isinstance(file_id, str) or not file_id:
+        return None
+
+    chat = mensaje.get("chat")
+    if not isinstance(chat, dict):
+        return None
+
+    chat_id = chat.get("id")
+    message_id = mensaje.get("message_id")
+    if not isinstance(chat_id, int) or not isinstance(message_id, int):
+        return None
+
+    duracion = audio.get("duration")
+    tamano = audio.get("file_size")
+    mime = audio.get("mime_type")
+
+    return VozEntrante(
+        chat_id=chat_id,
+        message_id=message_id,
+        file_id=file_id,
+        # Los tres son opcionales en la Bot API. Si no vienen, cero y cadena
+        # vacía: el que decide qué hacer con eso es quien llama.
+        duracion=duracion if isinstance(duracion, int) else 0,
+        mime=mime if isinstance(mime, str) and mime else "",
+        tamano=tamano if isinstance(tamano, int) else 0,
+    )
 
 
 def extraer_chat_id(update: Any) -> int | None:
